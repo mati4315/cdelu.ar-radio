@@ -14,9 +14,6 @@ upcloud_key.pub
 *.wav
 *.ogg
 
-# Carpeta de deploy
-deploy/
-
 # Logs
 *.log
 npm-debug.log*

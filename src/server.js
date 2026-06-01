@@ -3,13 +3,18 @@
 const path = require('node:path');
 const { exec } = require('node:child_process');
 const util = require('node:util');
+const { existsSync } = require('node:fs');
 const Fastify = require('fastify');
 const fastifyStatic = require('@fastify/static');
 const dotenv = require('dotenv');
 
-const execAsync = util.promisify(exec);
+// Cargar .env solo si existe (produccion o desarrollo local)
+const envPath = path.join(__dirname, '..', '.env');
+if (existsSync(envPath)) {
+  dotenv.config({ path: envPath });
+}
 
-dotenv.config();
+const execAsync = util.promisify(exec);
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -17,6 +22,7 @@ const SOURCE_USER = process.env.SOURCE_USER || '';
 const SOURCE_PASS = process.env.SOURCE_PASS || '';
 const STREAM_NAME = process.env.STREAM_NAME || 'Radio Live';
 const OFFLINE_TIMEOUT_MS = Number(process.env.OFFLINE_TIMEOUT_MS || 12000);
+const MAX_BUFFER_MB = Number(process.env.MAX_BUFFER_MB || 50);
 const BUFFER_CHUNKS = Math.max(1, Number(process.env.BUFFER_CHUNKS || 64));
 
 const serverFactory = (handler, opts) => {
@@ -32,12 +38,28 @@ const serverFactory = (handler, opts) => {
 };
 
 const app = Fastify({ serverFactory, logger: true, bodyLimit: 1073741824 });
+// Solo parseamos JSON explicitamente para los endpoints de admin
+app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
+  try {
+    done(null, JSON.parse(body.toString()));
+  } catch (e) {
+    done(null, body.toString());
+  }
+});
+// Para todo lo demas, devolvemos el payload (stream) sin consumir
+// para que el endpoint /source pueda hacer request.raw.on('data', ...)
 app.addContentTypeParser('*', function (request, payload, done) {
   done(null, payload);
 });
 
+// Favion para evitar 404 repetido
+app.get('/favicon.ico', async (request, reply) => {
+  return reply.code(204).send();
+});
+
 const listeners = new Set();
 const recentChunks = [];
+let approximateBufferBytes = 0;
 
 let sourceReq = null;
 let sourceConnectedAt = null;
@@ -48,9 +70,19 @@ function pushChunk(chunk) {
   if (!chunk || chunk.length === 0) {
     return;
   }
+  const MAX_BUFFER_BYTES = MAX_BUFFER_MB * 1024 * 1024;
   recentChunks.push(chunk);
-  while (recentChunks.length > BUFFER_CHUNKS) {
-    recentChunks.shift();
+  approximateBufferBytes += chunk.length;
+  while (recentChunks.length > BUFFER_CHUNKS && approximateBufferBytes > MAX_BUFFER_BYTES) {
+    const old = recentChunks.shift();
+    if (old) {
+      approximateBufferBytes -= old.length;
+    }
+  }
+  // Si el buffer en bytes explota, recortar por cantidad tambien
+  if (recentChunks.length > BUFFER_CHUNKS * 2) {
+    const old = recentChunks.shift();
+    if (old) approximateBufferBytes -= old.length;
   }
 }
 
@@ -140,8 +172,9 @@ app.route({
     lastSeen = Date.now();
     totalBytesIn = 0;
     recentChunks.length = 0;
+    approximateBufferBytes = 0;
 
-    request.log.info({ ip: request.ip }, 'source connected');
+    request.log.info({ ip: request.ip, sourceConnectedAt }, 'source connected');
 
     request.raw.on('data', (chunk) => {
       lastSeen = Date.now();
@@ -152,20 +185,26 @@ app.route({
 
     request.raw.on('end', () => {
       request.log.warn('source disconnected (end)');
-      sourceReq = null;
-      sourceConnectedAt = null;
+      if (sourceReq === request.raw) {
+        sourceReq = null;
+        sourceConnectedAt = null;
+      }
     });
 
     request.raw.on('close', () => {
-      request.log.warn('source disconnected (close)');
-      sourceReq = null;
-      sourceConnectedAt = null;
+      request.log.warn({ stillSource: sourceReq === request.raw }, 'source disconnected (close)');
+      if (sourceReq === request.raw) {
+        sourceReq = null;
+        sourceConnectedAt = null;
+      }
     });
 
     request.raw.on('error', (err) => {
       request.log.error({ err }, 'source stream error');
-      sourceReq = null;
-      sourceConnectedAt = null;
+      if (sourceReq === request.raw) {
+        sourceReq = null;
+        sourceConnectedAt = null;
+      }
     });
 
     reply.raw.writeHead(200, {
@@ -229,6 +268,7 @@ app.get('/status', async () => {
     live: isLive(),
     listeners: listeners.size,
     sourceConnectedAt,
+    sourceReqExists: sourceReq !== null,
     lastSeen: lastSeen ? new Date(lastSeen).toISOString() : null,
     totalBytesIn
   };
@@ -248,14 +288,22 @@ app.get('/api/autodj/status', async (request, reply) => {
 });
 
 app.post('/api/autodj', async (request, reply) => {
-  const body = request.body || {};
-  let action = body.action;
-  
-  // if payload isn't parsed correctly as object due to content type, try parsing manually
-  if (typeof body === 'string') {
-    try { action = JSON.parse(body).action; } catch(e) {}
-  } else if (Buffer.isBuffer(body)) {
-    try { action = JSON.parse(body.toString()).action; } catch(e) {}
+  let body = request.body;
+  // Si el body es un stream (porque no se parseo como JSON), lo consumimos
+  if (body && typeof body.on === 'function') {
+    body = await new Promise((resolve) => {
+      const chunks = [];
+      body.on('data', (c) => chunks.push(c));
+      body.on('end', () => resolve(Buffer.concat(chunks).toString()));
+    });
+  }
+  const raw = body || {};
+  let action = typeof raw === 'object' ? raw.action : null;
+  // Parse manual si es string
+  if (typeof raw === 'string') {
+    try { action = JSON.parse(raw).action; } catch(e) {}
+  } else if (Buffer.isBuffer(raw)) {
+    try { action = JSON.parse(raw.toString()).action; } catch(e) {}
   }
 
   try {
@@ -277,6 +325,19 @@ app.post('/api/autodj', async (request, reply) => {
 });
 
 app.get('/healthz', async () => ({ ok: true }));
+
+// Graceful shutdown
+const gracefulShutdown = async (signal) => {
+  app.log.info({ signal }, 'received shutdown signal');
+  for (const reply of listeners) {
+    try { safeEnd(reply.raw); } catch (_) {}
+  }
+  listeners.clear();
+  await app.close();
+  process.exit(0);
+};
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 app.listen({ port: PORT, host: HOST })
   .then(() => {
