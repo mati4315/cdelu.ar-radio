@@ -1,0 +1,26 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno (¡NUNCA subir al repo!)
+.env
+
+# Clave SSH privada (¡MUY SENSIBLE!)
+upcloud_key
+upcloud_key.pub
+
+# Archivos de música (demasiado grandes para git)
+*.mp3
+*.mp4
+*.wav
+*.ogg
+
+# Carpeta de deploy
+deploy/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema operativo
+.DS_Store
+Thumbs.db

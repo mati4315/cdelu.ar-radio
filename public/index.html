@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Radio Dashboard - CdelU</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --panel: rgba(20, 28, 42, 0.7);
+      --text: #f0f4f8;
+      --muted: #a0aec0;
+      --live: #10b981;
+      --offline: #ef4444;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --accent: #8b5cf6;
+      --border: rgba(255, 255, 255, 0.08);
+      --glass-bg: rgba(20, 28, 42, 0.4);
+      --glass-blur: blur(12px);
+    }
+    
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top right, #1e1b4b 0%, var(--bg) 60%);
+      color: var(--text);
+      font-family: "Inter", sans-serif;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 1000px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 2rem;
+    }
+
+    @media (min-width: 768px) {
+      .container {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    header {
+      width: 100%;
+      max-width: 1000px;
+      margin-bottom: 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1rem;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 2rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #60a5fa, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .card {
+      background: var(--glass-bg);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2rem;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.6);
+    }
+
+    .card-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-top: 0;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(0,0,0,0.3);
+      padding: 0.5rem 1rem;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      border: 1px solid var(--border);
+    }
+
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--offline);
+      box-shadow: 0 0 10px var(--offline);
+    }
+
+    .live-dot {
+      background: var(--live);
+      box-shadow: 0 0 10px var(--live);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-box {
+      background: rgba(0,0,0,0.2);
+      padding: 1rem;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+    }
+
+    .stat-label {
+      color: var(--muted);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.25rem;
+    }
+
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+
+    .actions {
+      display: flex;
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+
+    button, a.btn {
+      border: 0;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      color: white;
+      padding: 0.8rem 1.5rem;
+      font-size: 1rem;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.2s;
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      flex: 1;
+    }
+
+    button:hover, a.btn:hover {
+      opacity: 0.9;
+      transform: scale(1.02);
+    }
+
+    audio {
+      width: 100%;
+      margin-top: 1.5rem;
+      border-radius: 12px;
+      outline: none;
+    }
+
+    .cmd-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .cmd-item {
+      background: rgba(0,0,0,0.2);
+      border: 1px solid var(--border);
+      padding: 1rem;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .cmd-desc {
+      font-size: 0.9rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .cmd-code {
+      font-family: monospace;
+      background: rgba(0,0,0,0.4);
+      padding: 0.75rem;
+      border-radius: 8px;
+      color: #6ee7b7;
+      font-size: 0.9rem;
+      user-select: all;
+      border: 1px solid rgba(110, 231, 183, 0.2);
+    }
+
+    /* Switch CSS */
+    .switch-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(0,0,0,0.2);
+      border: 1px solid var(--border);
+      padding: 1.5rem;
+      border-radius: 12px;
+      margin-bottom: 1.5rem;
+    }
+    
+    .switch-info {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .switch-title {
+      font-weight: 600;
+      font-size: 1.1rem;
+    }
+
+    .switch-desc {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 34px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: var(--offline);
+      transition: .4s;
+      border-radius: 34px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 26px;
+      width: 26px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: var(--live);
+    }
+    input:checked + .slider:before {
+      transform: translateX(26px);
+    }
+    input:disabled + .slider {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Radio Dashboard</h1>
+    <div class="status-badge" id="headerStatus">
+      <div class="dot" id="dot"></div>
+      <span id="state">Conectando...</span>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- Controles Section -->
+    <div class="card" style="grid-column: 1 / -1;">
+      <h2 class="card-title">⚙️ Controles de Radio (Admin)</h2>
+      
+      <div class="switch-container">
+        <div class="switch-info">
+          <span class="switch-title">Auto-DJ (Música 24/7)</span>
+          <span class="switch-desc">Apágalo para poder transmitir en vivo desde tu PC.</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="autodjToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="actions" style="margin-top: 0;">
+        <button id="logoutBtn" type="button" style="background: rgba(255,255,255,0.1); border: 1px solid var(--border); flex: unset;">Cerrar Sesión (Admin)</button>
+      </div>
+    </div>
+
+    <!-- Monitor Section -->
+    <div class="card">
+      <h2 class="card-title">📡 Monitor de Transmisión</h2>
+      
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-label">Oyentes Actuales</div>
+          <div class="stat-value" id="listeners">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Datos Recibidos</div>
+          <div class="stat-value" id="bytes">0 MB</div>
+        </div>
+        <div class="stat-box" style="grid-column: span 2;">
+          <div class="stat-label">Última conexión del origen</div>
+          <div class="stat-value" id="uptime" style="font-size: 1rem;">-</div>
+        </div>
+      </div>
+
+      <audio id="player" controls preload="none" src="/live.mp3"></audio>
+      
+      <div class="actions">
+        <button id="playBtn" type="button">▶ Reproducir</button>
+        <a class="btn" id="vlc" href="/live.mp3" target="_blank" rel="noopener" style="background: rgba(255,255,255,0.1); border: 1px solid var(--border);">VLC / Winamp</a>
+      </div>
+    </div>
+
+    <!-- Cheat Sheet Section -->
+    <div class="card">
+      <h2 class="card-title">💻 Comandos (Cheat Sheet)</h2>
+      <ul class="cmd-list">
+        <li class="cmd-item">
+          <span class="cmd-desc">Detener Auto-DJ (Para transmitir en vivo)</span>
+          <div class="cmd-code">pm2 stop radio-loop</div>
+        </li>
+        <li class="cmd-item">
+          <span class="cmd-desc">Iniciar Auto-DJ (Música automática)</span>
+          <div class="cmd-code">pm2 start radio-loop</div>
+        </li>
+        <li class="cmd-item">
+          <span class="cmd-desc">Reiniciar Servidor Principal</span>
+          <div class="cmd-code">pm2 restart radio-envivo</div>
+        </li>
+        <li class="cmd-item">
+          <span class="cmd-desc">Ver Logs del Servidor</span>
+          <div class="cmd-code">pm2 logs</div>
+        </li>
+        <li class="cmd-item">
+          <span class="cmd-desc">Editar Configuración (.env)</span>
+          <div class="cmd-code">nano .env</div>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    const player = document.getElementById('player');
+    const playBtn = document.getElementById('playBtn');
+    const dot = document.getElementById('dot');
+    const state = document.getElementById('state');
+    const listenersEl = document.getElementById('listeners');
+    const bytesEl = document.getElementById('bytes');
+    const uptimeEl = document.getElementById('uptime');
+    
+    // AutoDJ Controls
+    const autodjToggle = document.getElementById('autodjToggle');
+    const logoutBtn = document.getElementById('logoutBtn');
+    let isFetchingStatus = false;
+
+    playBtn.addEventListener('click', async () => {
+      try {
+        await player.play();
+      } catch (err) {
+        console.error('Playback failed:', err);
+      }
+    });
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    function formatDate(isoString) {
+      if (!isoString) return '-';
+      const d = new Date(isoString);
+      return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' - ' + d.toLocaleDateString('es-ES');
+    }
+
+    // Auth Helper
+    let authHeader = localStorage.getItem('radioAuth');
+
+    async function apiCall(url, method = 'GET', body = null) {
+      if (!authHeader) {
+        const user = prompt('Usuario de Administrador:');
+        if (user === null) return null; // user cancelled
+        const pass = prompt('Contraseña:');
+        if (pass === null) return null; // user cancelled
+        authHeader = 'Basic ' + btoa(user + ':' + pass);
+        localStorage.setItem('radioAuth', authHeader);
+      }
+      
+      const options = {
+        method,
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json'
+        }
+      };
+      
+      if (body) {
+        options.body = JSON.stringify(body);
+      }
+      
+      try {
+        const res = await fetch(url, options);
+        if (res.status === 401) {
+          alert('Credenciales incorrectas o no autorizadas.');
+          localStorage.removeItem('radioAuth');
+          authHeader = null;
+          return null;
+        }
+        return res;
+      } catch (err) {
+        console.error('API Error:', err);
+        return null;
+      }
+    }
+
+    logoutBtn.addEventListener('click', () => {
+      localStorage.removeItem('radioAuth');
+      authHeader = null;
+      alert('Sesión cerrada. Se te pedirán las credenciales en la próxima acción.');
+    });
+
+    // Handle Switch Toggle
+    autodjToggle.addEventListener('change', async (e) => {
+      autodjToggle.disabled = true;
+      const action = e.target.checked ? 'start' : 'stop';
+      
+      const res = await apiCall('/api/autodj', 'POST', { action });
+      
+      if (!res || !res.ok) {
+        alert('Error al cambiar el estado del Auto-DJ. Intenta de nuevo.');
+        // Revert UI
+        e.target.checked = !e.target.checked;
+      }
+      
+      autodjToggle.disabled = false;
+      refreshAutoDjStatus(); // Force status update
+    });
+
+    async function refreshAutoDjStatus() {
+      // Solo actualiza si tenemos credenciales para evitar prompts infinitos automáticos
+      if (!authHeader) return;
+      
+      if (isFetchingStatus) return;
+      isFetchingStatus = true;
+      
+      const res = await apiCall('/api/autodj/status', 'GET');
+      if (res && res.ok) {
+        const data = await res.json();
+        autodjToggle.checked = data.isRunning;
+      }
+      
+      isFetchingStatus = false;
+    }
+
+    async function refreshStatus() {
+      try {
+        const res = await fetch('/status', { cache: 'no-store' });
+        const data = await res.json();
+        
+        const live = Boolean(data.live);
+        state.textContent = live ? 'EN VIVO' : 'OFFLINE';
+        if(live) {
+          dot.classList.add('live-dot');
+          dot.style.background = 'var(--live)';
+        } else {
+          dot.classList.remove('live-dot');
+          dot.style.background = 'var(--offline)';
+        }
+
+        listenersEl.textContent = data.listeners || 0;
+        bytesEl.textContent = formatBytes(data.totalBytesIn || 0);
+        uptimeEl.textContent = formatDate(data.sourceConnectedAt);
+
+      } catch (err) {
+        state.textContent = 'OFFLINE';
+        dot.classList.remove('live-dot');
+        dot.style.background = 'var(--offline)';
+        listenersEl.textContent = '0';
+      }
+      
+      // Update toggle state if logged in
+      if (authHeader && !autodjToggle.disabled) {
+        refreshAutoDjStatus();
+      }
+    }
+
+    refreshStatus();
+    setInterval(refreshStatus, 3000);
+  </script>
+</body>
+</html>

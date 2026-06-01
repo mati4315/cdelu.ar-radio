@@ -1,0 +1,19 @@
+﻿{
+  "name": "fastify-radio-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Low-latency MP3 relay with Fastify for small audiences.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@fastify/static": "^7.0.4",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1"
+  }
+}

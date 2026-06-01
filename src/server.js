@@ -1,0 +1,288 @@
+'use strict';
+
+const path = require('node:path');
+const { exec } = require('node:child_process');
+const util = require('node:util');
+const Fastify = require('fastify');
+const fastifyStatic = require('@fastify/static');
+const dotenv = require('dotenv');
+
+const execAsync = util.promisify(exec);
+
+dotenv.config();
+
+const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '0.0.0.0';
+const SOURCE_USER = process.env.SOURCE_USER || '';
+const SOURCE_PASS = process.env.SOURCE_PASS || '';
+const STREAM_NAME = process.env.STREAM_NAME || 'Radio Live';
+const OFFLINE_TIMEOUT_MS = Number(process.env.OFFLINE_TIMEOUT_MS || 12000);
+const BUFFER_CHUNKS = Math.max(1, Number(process.env.BUFFER_CHUNKS || 64));
+
+const serverFactory = (handler, opts) => {
+  const server = require('node:http').createServer((req, res) => {
+    // Icecast clients like BUTT use the custom 'SOURCE' method.
+    // Fastify natively rejects it, so we remap it to 'PUT' before it reaches Fastify.
+    if (req.method === 'SOURCE') {
+      req.method = 'PUT';
+    }
+    handler(req, res);
+  });
+  return server;
+};
+
+const app = Fastify({ serverFactory, logger: true, bodyLimit: 1073741824 });
+app.addContentTypeParser('*', function (request, payload, done) {
+  done(null, payload);
+});
+
+const listeners = new Set();
+const recentChunks = [];
+
+let sourceReq = null;
+let sourceConnectedAt = null;
+let lastSeen = null;
+let totalBytesIn = 0;
+
+function pushChunk(chunk) {
+  if (!chunk || chunk.length === 0) {
+    return;
+  }
+  recentChunks.push(chunk);
+  while (recentChunks.length > BUFFER_CHUNKS) {
+    recentChunks.shift();
+  }
+}
+
+function writeToListeners(chunk) {
+  for (const reply of listeners) {
+    try {
+      reply.raw.write(chunk);
+    } catch (err) {
+      app.log.warn({ err }, 'listener write failed');
+      listeners.delete(reply);
+      safeEnd(reply.raw);
+    }
+  }
+}
+
+function safeEnd(res) {
+  try {
+    if (!res.writableEnded) {
+      res.end();
+    }
+  } catch (_) {
+    // Ignore close errors.
+  }
+}
+
+function isLive() {
+  if (!sourceReq) {
+    return false;
+  }
+  if (!lastSeen) {
+    return false;
+  }
+  return Date.now() - lastSeen <= OFFLINE_TIMEOUT_MS;
+}
+
+setInterval(() => {
+  if (!isLive() && sourceReq) {
+    app.log.warn('source heartbeat timeout; forcing source disconnect');
+    try {
+      sourceReq.destroy();
+    } catch (_) {
+      // Ignore destroy errors.
+    }
+  }
+}, Math.max(2000, Math.floor(OFFLINE_TIMEOUT_MS / 2))).unref();
+
+app.register(fastifyStatic, {
+  root: path.join(__dirname, '..', 'public'),
+  prefix: '/'
+});
+
+app.addHook('onRequest', async (request, reply) => {
+  const isSourceEndpoint = request.url === '/source' && (request.method === 'POST' || request.method === 'PUT');
+  const isAdminEndpoint = request.url.startsWith('/api/autodj');
+
+  if (isSourceEndpoint || isAdminEndpoint) {
+    const auth = request.headers.authorization || '';
+    const expected = `Basic ${Buffer.from(`${SOURCE_USER}:${SOURCE_PASS}`).toString('base64')}`;
+
+    if (!SOURCE_USER || !SOURCE_PASS) {
+      request.log.error('SOURCE_USER/SOURCE_PASS not configured');
+      return reply.code(500).send({ error: 'Server not configured for source auth' });
+    }
+
+    if (auth !== expected) {
+      reply.header('WWW-Authenticate', 'Basic realm="radio-admin"');
+      return reply.code(401).send({ error: 'Unauthorized' });
+    }
+  }
+});
+
+app.route({
+  method: ['POST', 'PUT'],
+  url: '/source',
+  handler: async (request, reply) => {
+    if (sourceReq && sourceReq !== request.raw) {
+      request.log.warn('existing source replaced by a new one');
+      try {
+        sourceReq.destroy();
+      } catch (_) {
+        // Ignore
+      }
+    }
+
+    sourceReq = request.raw;
+    sourceConnectedAt = new Date().toISOString();
+    lastSeen = Date.now();
+    totalBytesIn = 0;
+    recentChunks.length = 0;
+
+    request.log.info({ ip: request.ip }, 'source connected');
+
+    request.raw.on('data', (chunk) => {
+      lastSeen = Date.now();
+      totalBytesIn += chunk.length;
+      pushChunk(chunk);
+      writeToListeners(chunk);
+    });
+
+    request.raw.on('end', () => {
+      request.log.warn('source disconnected (end)');
+      sourceReq = null;
+      sourceConnectedAt = null;
+    });
+
+    request.raw.on('close', () => {
+      request.log.warn('source disconnected (close)');
+      sourceReq = null;
+      sourceConnectedAt = null;
+    });
+
+    request.raw.on('error', (err) => {
+      request.log.error({ err }, 'source stream error');
+      sourceReq = null;
+      sourceConnectedAt = null;
+    });
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store'
+    });
+    reply.raw.write('SOURCE_OK\n');
+
+    await new Promise((resolve) => {
+      request.raw.once('close', resolve);
+      request.raw.once('end', resolve);
+      request.raw.once('error', resolve);
+    });
+
+    safeEnd(reply.raw);
+    return reply;
+  }
+});
+
+app.get('/En-vivo-Cdelu.mp3', async (request, reply) => {
+  return serveLiveStream(request, reply);
+});
+
+app.get('/live.mp3', async (request, reply) => {
+  return serveLiveStream(request, reply);
+});
+
+async function serveLiveStream(request, reply) {
+  reply.raw.writeHead(200, {
+    'Content-Type': 'audio/mpeg',
+    'Cache-Control': 'no-cache, no-store, must-revalidate, private',
+    Pragma: 'no-cache',
+    Expires: '0',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+    'Transfer-Encoding': 'chunked'
+  });
+
+  for (const chunk of recentChunks) {
+    reply.raw.write(chunk);
+  }
+
+  listeners.add(reply);
+  request.log.info({ listeners: listeners.size, ip: request.ip }, 'listener connected');
+
+  const cleanup = () => {
+    listeners.delete(reply);
+    safeEnd(reply.raw);
+    request.log.info({ listeners: listeners.size }, 'listener disconnected');
+  };
+
+  request.raw.once('close', cleanup);
+  request.raw.once('error', cleanup);
+
+  return reply;
+}
+
+app.get('/status', async () => {
+  return {
+    streamName: STREAM_NAME,
+    live: isLive(),
+    listeners: listeners.size,
+    sourceConnectedAt,
+    lastSeen: lastSeen ? new Date(lastSeen).toISOString() : null,
+    totalBytesIn
+  };
+});
+
+app.get('/api/autodj/status', async (request, reply) => {
+  try {
+    const { stdout } = await execAsync('pm2 jlist');
+    const list = JSON.parse(stdout);
+    const loopProcess = list.find(p => p.name === 'radio-loop');
+    const isRunning = loopProcess && loopProcess.pm2_env.status === 'online';
+    return { isRunning };
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ error: 'Failed to get pm2 status' });
+  }
+});
+
+app.post('/api/autodj', async (request, reply) => {
+  const body = request.body || {};
+  let action = body.action;
+  
+  // if payload isn't parsed correctly as object due to content type, try parsing manually
+  if (typeof body === 'string') {
+    try { action = JSON.parse(body).action; } catch(e) {}
+  } else if (Buffer.isBuffer(body)) {
+    try { action = JSON.parse(body.toString()).action; } catch(e) {}
+  }
+
+  try {
+    if (action === 'start') {
+      await execAsync('pm2 start radio-loop');
+    } else if (action === 'stop') {
+      await execAsync('pm2 stop radio-loop');
+      // Asegurarse de que los procesos hijos mueran
+      try { await execAsync('pkill -f "ffmpeg -re -i"'); } catch(e) {}
+      try { await execAsync('pkill -f "curl.*source"'); } catch(e) {}
+    } else {
+      return reply.code(400).send({ error: 'Invalid action' });
+    }
+    return { success: true };
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ error: 'Command failed' });
+  }
+});
+
+app.get('/healthz', async () => ({ ok: true }));
+
+app.listen({ port: PORT, host: HOST })
+  .then(() => {
+    app.log.info({ PORT, HOST }, 'radio relay server started');
+  })
+  .catch((err) => {
+    app.log.error({ err }, 'failed to start server');
+    process.exit(1);
+  });
