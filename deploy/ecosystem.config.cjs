@@ -27,6 +27,16 @@ module.exports = {
       autorestart: true,
       max_restarts: 5,
       restart_delay: 10000
+    },
+    {
+      name: 'srt-listener',
+      script: 'restream.sh',
+      autorestart: false,
+      max_restarts: 0,
+      error_file: '/var/log/radio/srt-error.log',
+      out_file: '/var/log/radio/srt-output.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      merge_logs: true
     }
   ]
 };

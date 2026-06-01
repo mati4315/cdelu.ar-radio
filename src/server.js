@@ -136,7 +136,7 @@ app.register(fastifyStatic, {
 
 app.addHook('onRequest', async (request, reply) => {
   const isSourceEndpoint = request.url === '/source' && (request.method === 'POST' || request.method === 'PUT');
-  const isAdminEndpoint = request.url.startsWith('/api/autodj');
+  const isAdminEndpoint = request.url.startsWith('/api/autodj') || request.url.startsWith('/api/srt');
 
   if (isSourceEndpoint || isAdminEndpoint) {
     const auth = request.headers.authorization || '';
@@ -314,6 +314,52 @@ app.post('/api/autodj', async (request, reply) => {
       // Asegurarse de que los procesos hijos mueran
       try { await execAsync('pkill -f "ffmpeg -re -i"'); } catch(e) {}
       try { await execAsync('pkill -f "curl.*source"'); } catch(e) {}
+    } else {
+      return reply.code(400).send({ error: 'Invalid action' });
+    }
+    return { success: true };
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ error: 'Command failed' });
+  }
+});
+
+app.get('/api/srt/status', async (request, reply) => {
+  try {
+    const { stdout } = await execAsync('pm2 jlist');
+    const list = JSON.parse(stdout);
+    const srtProcess = list.find(p => p.name === 'srt-listener');
+    const isRunning = srtProcess && srtProcess.pm2_env.status === 'online';
+    return { isRunning };
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ error: 'Failed to get pm2 status' });
+  }
+});
+
+app.post('/api/srt', async (request, reply) => {
+  let body = request.body;
+  if (body && typeof body.on === 'function') {
+    body = await new Promise((resolve) => {
+      const chunks = [];
+      body.on('data', (c) => chunks.push(c));
+      body.on('end', () => resolve(Buffer.concat(chunks).toString()));
+    });
+  }
+  const raw = body || {};
+  let action = typeof raw === 'object' ? raw.action : null;
+  if (typeof raw === 'string') {
+    try { action = JSON.parse(raw).action; } catch(e) {}
+  } else if (Buffer.isBuffer(raw)) {
+    try { action = JSON.parse(raw.toString()).action; } catch(e) {}
+  }
+
+  try {
+    if (action === 'start') {
+      await execAsync('pm2 start srt-listener');
+    } else if (action === 'stop') {
+      await execAsync('pm2 stop srt-listener');
+      try { await execAsync('pkill -f "ffmpeg.*srt"'); } catch(e) {}
     } else {
       return reply.code(400).send({ error: 'Invalid action' });
     }

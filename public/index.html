@@ -323,6 +323,17 @@
         </label>
       </div>
 
+      <div class="switch-container" style="margin-top: -0.5rem;">
+        <div class="switch-info">
+          <span class="switch-title">SRT Restreamer (OBS → Radio + Facebook)</span>
+          <span class="switch-desc">Activalo antes de transmitir desde OBS Studio.</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="srtToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+
       <div class="actions" style="margin-top: 0;">
         <button id="logoutBtn" type="button" style="background: rgba(255,255,255,0.1); border: 1px solid var(--border); flex: unset;">Cerrar Sesión (Admin)</button>
       </div>
@@ -392,8 +403,9 @@
     const bytesEl = document.getElementById('bytes');
     const uptimeEl = document.getElementById('uptime');
     
-    // AutoDJ Controls
+    // AutoDJ & SRT Controls
     const autodjToggle = document.getElementById('autodjToggle');
+    const srtToggle = document.getElementById('srtToggle');
     const logoutBtn = document.getElementById('logoutBtn');
     let isFetchingStatus = false;
 
@@ -498,6 +510,31 @@
       isFetchingStatus = false;
     }
 
+    // Handle SRT Toggle
+    srtToggle.addEventListener('change', async (e) => {
+      srtToggle.disabled = true;
+      const action = e.target.checked ? 'start' : 'stop';
+      
+      const res = await apiCall('/api/srt', 'POST', { action });
+      
+      if (!res || !res.ok) {
+        alert('Error al cambiar el estado del SRT Restreamer. Intenta de nuevo.');
+        e.target.checked = !e.target.checked;
+      }
+      
+      srtToggle.disabled = false;
+      refreshSrtStatus(); // Force status update
+    });
+
+    async function refreshSrtStatus() {
+      if (!authHeader) return;
+      const res = await apiCall('/api/srt/status', 'GET');
+      if (res && res.ok) {
+        const data = await res.json();
+        srtToggle.checked = data.isRunning;
+      }
+    }
+
     async function refreshStatus() {
       try {
         const res = await fetch('/status', { cache: 'no-store' });
@@ -527,6 +564,7 @@
       // Update toggle state if logged in
       if (authHeader && !autodjToggle.disabled) {
         refreshAutoDjStatus();
+        if (!srtToggle.disabled) refreshSrtStatus();
       }
     }
 
