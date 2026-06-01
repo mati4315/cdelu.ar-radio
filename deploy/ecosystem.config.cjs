@@ -31,8 +31,8 @@ module.exports = {
     {
       name: 'srt-listener',
       script: 'restream.sh',
-      autorestart: false,
-      max_restarts: 0,
+      autorestart: true,
+      max_restarts: 10,
       error_file: '/var/log/radio/srt-error.log',
       out_file: '/var/log/radio/srt-output.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',

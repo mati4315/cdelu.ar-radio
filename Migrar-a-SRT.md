@@ -163,8 +163,17 @@ El flujo del Dashboard quedaría:
 3. Transmitir desde OBS
 4. Al terminar: apagar SRT, encender Auto-DJ
 
-### 7. Actualizar `server.js`
-Agregar el endpoint `/api/srt`:
+### 3. Modificar `server.js` (Timeouts y Rutas)
+En `src/server.js`, es CRÍTICO permitir que la conexión espere si OBS demora en conectar:
+```javascript
+function isLive() {
+  if (!sourceReq || !lastSeen) return false;
+  // EVITAR TIMEOUT INICIAL de ffmpeg esperando a OBS:
+  if (totalBytesIn === 0) return Date.now() - lastSeen <= 12 * 3600 * 1000;
+  return Date.now() - lastSeen <= OFFLINE_TIMEOUT_MS;
+}
+```
+También agregamos un endpoint `/api/srt` para controlar el relay desde la web:
 
 ```javascript
 // Misma lógica que /api/autodj pero para srt-listener

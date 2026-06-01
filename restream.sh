@@ -33,23 +33,56 @@ SRT_PORT="${SRT_PORT:-8890}"
 
 echo "Esperando conexión SRT de OBS en el puerto $SRT_PORT..."
 
-if [ "$FACEBOOK_KEY" != "TU_CLAVE_DE_TRANSMISION" ]; then
-  ffmpeg -mode listener -i "srt://0.0.0.0:${SRT_PORT}?mode=listener&latency=300000" \
-    -c copy -f flv "${FACEBOOK_URL}${FACEBOOK_KEY}" \
-    -vn -c:a libmp3lame -b:a 128k -f mp3 - 2>/dev/null | \
-    curl -s -X PUT \
+# Bucle de reconexión automática: si ffmpeg/curl se cae, vuelve a intentarlo
+while true; do
+  echo "[$(date -u +%FT%TZ)] Iniciando pipeline SRT..."
+
+  if [ "$FACEBOOK_KEY" != "TU_CLAVE_DE_TRANSMISION" ]; then
+    # MODO DUAL: Facebook Live + Radio Web
+    ffmpeg \
+      -i "srt://0.0.0.0:${SRT_PORT}?mode=listener&latency=300000" \
+      -c copy -f flv "${FACEBOOK_URL}${FACEBOOK_KEY}" \
+      -vn -c:a libmp3lame -b:a 128k -f mp3 - \
+      2>>/tmp/ffmpeg-restream.log | \
+    curl \
+      -v \
+      -X PUT \
       -H 'Content-Type: application/octet-stream' \
       -H 'Transfer-Encoding: chunked' \
+      -H 'Connection: keep-alive' \
+      --keepalive-time 30 \
+      --speed-limit 0 \
+      --speed-time 0 \
+      --max-time 0 \
+      --no-buffer \
       -u "${SOURCE_USER}:${SOURCE_PASS}" \
-      -T - "$SOURCE_URL" \
-      2>/dev/null || true
-else
-  ffmpeg -mode listener -i "srt://0.0.0.0:${SRT_PORT}?mode=listener&latency=300000" \
-    -vn -c:a libmp3lame -b:a 128k -f mp3 - 2>/dev/null | \
-    curl -s -X PUT \
+      -T - \
+      "$SOURCE_URL" \
+      2>>/tmp/curl-restream.log
+  else
+    # MODO SOLO RADIO: Sin Facebook
+    ffmpeg \
+      -i "srt://0.0.0.0:${SRT_PORT}?mode=listener&latency=300000" \
+      -vn -c:a libmp3lame -b:a 128k -f mp3 - \
+      2>>/tmp/ffmpeg-restream.log | \
+    curl \
+      -v \
+      -X PUT \
       -H 'Content-Type: application/octet-stream' \
       -H 'Transfer-Encoding: chunked' \
+      -H 'Connection: keep-alive' \
+      --keepalive-time 30 \
+      --speed-limit 0 \
+      --speed-time 0 \
+      --max-time 0 \
+      --no-buffer \
       -u "${SOURCE_USER}:${SOURCE_PASS}" \
-      -T - "$SOURCE_URL" \
-      2>/dev/null || true
-fi
+      -T - \
+      "$SOURCE_URL" \
+      2>>/tmp/curl-restream.log
+  fi
+
+  EXIT_CODE=$?
+  echo "[$(date -u +%FT%TZ)] Pipeline terminó (código $EXIT_CODE). Reintentando en 3s..."
+  sleep 3
+done

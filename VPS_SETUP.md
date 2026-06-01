@@ -103,6 +103,7 @@ eval "$(pm2 startup systemd -u root --hp /root 2>&1 | tail -1)"
 ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow 443/tcp
+ufw allow 8890/udp
 ufw --force enable
 
 echo "=== PM2 STATUS ==="
@@ -242,6 +243,7 @@ pm2 startup systemd -u root --hp /root
 ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow 443/tcp
+ufw allow 8890/udp
 ufw --force enable
 ```
 
@@ -350,23 +352,40 @@ pm2 delete radio-loop && pm2 start radio-loop  # Forzar reinicio completo
 pm2 stop radio-loop && pkill -f "ffmpeg -re -i" && pkill -f "curl.*source" 2>/dev/null
 ```
 
-### Transmitir en Vivo desde PC (BUTT)
+### Transmitir en Vivo desde PC (OBS Studio con SRT)
 
-> ⚠️ **Importante:** Antes de transmitir, **apagá el Auto-DJ** desde el Dashboard o con `pm2 stop radio-loop`.
+> ⚠️ **Importante:** Antes de transmitir, **apagá el Auto-DJ** desde el Dashboard o con `pm2 stop radio-loop`. Luego **encendé el SRT Restreamer**.
 
-Configuración en **BUTT** (Broadcast Using This Tool):
-- **Server type:** Icecast / HTTP source compatible
-- **Address:** `radio.cdelu.io`
-- **Port:** `443`
-- **Mountpoint/path:** `/source`
-- **Username:** El `SOURCE_USER` del `.env`
-- **Password:** El `SOURCE_PASS` del `.env`
-- **Codec:** `MP3`
-- **Bitrate:** `128 kbps`
-- **Channels:** `Stereo`
-- **Auto reconnect:** ✅ Habilitado
+Configuración en **OBS Studio**:
+1. Entrar a Ajustes > **Emisión**.
+2. **Servicio:** Personalizado.
+3. **Servidor:** `srt://radio.cdelu.io:8890?mode=caller`
+4. **Clave de retransmisión:** *(dejar vacío, no hace falta).*
+5. Dale a **Iniciar Transmisión**. El servidor (FFMPEG) detectará la conexión automáticamente y retransmitirá a la web (y Facebook si configuraste la key).
+
+*(Ya no se utiliza BUTT. OBS captura el audio del sistema y lo transmite directo).*
 
 ---
+
+## 7. Troubleshooting de SRT (Problemas Frecuentes)
+
+Si al intentar transmitir con SRT (OBS) la conexión falla o el switch se apaga:
+
+1. **Revisar puertos UDP en el VPS:**
+   Asegurate de que el puerto `8890/udp` esté abierto en el firewall del servidor (`ufw allow 8890/udp`) y también en el **panel de control de tu proveedor VPS** (Hostinger, UpCloud, etc). SRT utiliza UDP obligatoriamente.
+   
+2. **Timeouts en el servidor Node.js (Broken pipe):**
+   Si Node.js corta la conexión por inactividad antes de que OBS envíe audio, verificá que en `src/server.js`, la función `isLive()` ignore el timeout inicial para `totalBytesIn === 0`.
+   
+3. **El switch se apaga solo (ffmpeg muere):**
+   Verificá que en `deploy/ecosystem.config.cjs`, el proceso `srt-listener` tenga configurado `autorestart: true`. Si estaba en `false`, FFMPEG se apagaba por timeout al no recibir conexión de OBS inmediatamente y el dashboard lo reflejaba.
+
+4. **Permisos de SSH Key (Windows):**
+   Si no te podés conectar al VPS porque "Permissions are too open" en el archivo `upcloud_key`:
+   ```powershell
+   icacls upcloud_key /inheritance:r
+   icacls upcloud_key /grant:r "$($env:USERNAME):(R)"
+   ```
 
 ## 7. Seguridad
 

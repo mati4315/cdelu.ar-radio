@@ -115,6 +115,12 @@ function isLive() {
   if (!lastSeen) {
     return false;
   }
+  // Allow the connection to sit idle for up to 12 hours before the first byte arrives.
+  // This is crucial for the ffmpeg | curl pipeline, which connects curl immediately
+  // even while ffmpeg is waiting for an incoming SRT connection.
+  if (totalBytesIn === 0) {
+    return Date.now() - lastSeen <= 12 * 3600 * 1000;
+  }
   return Date.now() - lastSeen <= OFFLINE_TIMEOUT_MS;
 }
 
