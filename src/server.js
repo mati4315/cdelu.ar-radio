@@ -173,7 +173,8 @@ app.route({
       }
     }
 
-    sourceReq = request.raw;
+    const rawReq = request.raw;
+    sourceReq = rawReq;
     sourceConnectedAt = new Date().toISOString();
     lastSeen = Date.now();
     totalBytesIn = 0;
@@ -182,36 +183,51 @@ app.route({
 
     request.log.info({ ip: request.ip, sourceConnectedAt }, 'source connected');
 
-    request.raw.on('data', (chunk) => {
+    // Determine the data stream to read from.
+    // Fastify's content type parser may have already consumed request.raw,
+    // so we check if the body is a readable stream (e.g. from BUTT/Icecast).
+    // For curl with chunked transfer, request.raw is still readable.
+    const body = request.body;
+    const isBodyStream = body && typeof body.on === 'function' && typeof body.read === 'function';
+    const dataStream = isBodyStream ? body : rawReq;
+
+    request.log.info({ usingBodyStream: isBodyStream }, 'source data stream selected');
+
+    dataStream.on('data', (chunk) => {
       lastSeen = Date.now();
       totalBytesIn += chunk.length;
       pushChunk(chunk);
       writeToListeners(chunk);
     });
 
-    request.raw.on('end', () => {
+    dataStream.on('end', () => {
       request.log.warn('source disconnected (end)');
-      if (sourceReq === request.raw) {
+      if (sourceReq === rawReq) {
         sourceReq = null;
         sourceConnectedAt = null;
       }
     });
 
-    request.raw.on('close', () => {
-      request.log.warn({ stillSource: sourceReq === request.raw }, 'source disconnected (close)');
-      if (sourceReq === request.raw) {
+    rawReq.on('close', () => {
+      request.log.warn({ stillSource: sourceReq === rawReq }, 'source disconnected (close)');
+      if (sourceReq === rawReq) {
         sourceReq = null;
         sourceConnectedAt = null;
       }
     });
 
-    request.raw.on('error', (err) => {
+    dataStream.on('error', (err) => {
       request.log.error({ err }, 'source stream error');
-      if (sourceReq === request.raw) {
+      if (sourceReq === rawReq) {
         sourceReq = null;
         sourceConnectedAt = null;
       }
     });
+
+    // Resume the data stream in case it is paused (common with Fastify body streams)
+    if (isBodyStream && typeof dataStream.resume === 'function') {
+      dataStream.resume();
+    }
 
     reply.raw.writeHead(200, {
       'Content-Type': 'text/plain; charset=utf-8',
@@ -220,9 +236,9 @@ app.route({
     reply.raw.write('SOURCE_OK\n');
 
     await new Promise((resolve) => {
-      request.raw.once('close', resolve);
-      request.raw.once('end', resolve);
-      request.raw.once('error', resolve);
+      rawReq.once('close', resolve);
+      dataStream.once('end', resolve);
+      dataStream.once('error', resolve);
     });
 
     safeEnd(reply.raw);
@@ -377,6 +393,35 @@ app.post('/api/srt', async (request, reply) => {
 });
 
 app.get('/healthz', async () => ({ ok: true }));
+
+// ── Recordings API ──────────────────────────────────────────────────────────
+const fs = require('node:fs');
+const RECORDINGS_DIR = path.join(__dirname, '..', 'public', 'recordings');
+
+app.get('/api/recordings', async (request, reply) => {
+  try {
+    if (!fs.existsSync(RECORDINGS_DIR)) {
+      return { recordings: [] };
+    }
+    const files = fs.readdirSync(RECORDINGS_DIR)
+      .filter(f => f.endsWith('.mp4'))
+      .map(f => {
+        const stat = fs.statSync(path.join(RECORDINGS_DIR, f));
+        return {
+          filename: f,
+          url: `/recordings/${f}`,
+          sizeMB: (stat.size / 1024 / 1024).toFixed(2),
+          date: stat.mtime.toISOString()
+        };
+      })
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    return { recordings: files };
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ error: 'Failed to list recordings' });
+  }
+});
+
 
 // Graceful shutdown
 const gracefulShutdown = async (signal) => {
