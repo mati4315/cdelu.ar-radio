@@ -241,6 +241,18 @@
       gap: 0.75rem;
     }
 
+    .recording-item.compact {
+      gap: 0.5rem;
+    }
+
+    .recording-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
     .recording-meta {
       display: flex;
       justify-content: space-between;
@@ -263,11 +275,63 @@
       font-size: 0.9rem;
     }
 
-    .recording-player {
+    .recordings-status-bar {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    .mini-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .mini-pill .dot {
+      width: 9px;
+      height: 9px;
+      box-shadow: none;
+    }
+
+    .mini-pill.ok .dot {
+      background: var(--live);
+    }
+
+    .mini-pill.warn .dot {
+      background: #f59e0b;
+    }
+
+    .mini-pill.bad .dot {
+      background: var(--offline);
+    }
+
+    .selected-recording {
       width: 100%;
       border-radius: 12px;
       background: #000;
-      min-height: 220px;
+      min-height: 280px;
+      margin-bottom: 1rem;
+    }
+
+    .selected-recording-shell {
+      display: none;
+      margin-bottom: 1rem;
+      padding: 1rem;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: rgba(0,0,0,0.16);
+    }
+
+    .selected-recording-shell.visible {
+      display: grid;
+      gap: 0.75rem;
     }
 
     /* Switch CSS */
@@ -413,10 +477,27 @@
     <div class="card">
       <h2 class="card-title">🎞 Grabaciones del VPS</h2>
       <div class="cmd-desc" style="margin-bottom: 1rem;">Archivos guardados por OBS en el VPS. Necesitás sesión de admin para verlos.</div>
+      <div class="recordings-status-bar" id="systemStatusBar">
+        <span class="mini-pill warn" id="facebookStatus"><span class="dot"></span><span>Facebook: verificando</span></span>
+        <span class="mini-pill warn" id="srtStatusPill"><span class="dot"></span><span>SRT: verificando</span></span>
+        <span class="mini-pill warn" id="recordingsDirStatus"><span class="dot"></span><span>Grabaciones: verificando</span></span>
+      </div>
       <div class="actions" style="margin-top: 0; margin-bottom: 1rem;">
         <button id="refreshRecordingsBtn" type="button">Actualizar lista</button>
       </div>
       <div id="recordingsStatus" class="cmd-desc" style="margin-bottom: 1rem;">Cargando...</div>
+      <div id="selectedRecordingShell" class="selected-recording-shell">
+        <div class="recording-title">
+          <strong id="selectedRecordingName">Seleccioná una grabación</strong>
+          <span class="cmd-desc" id="selectedRecordingMeta">-</span>
+        </div>
+        <video id="selectedRecordingPlayer" class="selected-recording" controls preload="metadata" playsinline></video>
+        <div class="actions" style="margin-top: 0;">
+          <a class="btn" id="selectedRecordingDownload" href="#" target="_blank" rel="noopener">Descargar</a>
+          <button id="selectedRecordingDelete" type="button" style="background: rgba(255,255,255,0.1); border: 1px solid var(--border);">Eliminar</button>
+          <button id="selectedRecordingClose" type="button" style="background: rgba(255,255,255,0.1); border: 1px solid var(--border);">Cerrar</button>
+        </div>
+      </div>
       <div id="recordingsList" class="recordings-list"></div>
     </div>
 
@@ -456,15 +537,26 @@
     const listenersEl = document.getElementById('listeners');
     const bytesEl = document.getElementById('bytes');
     const uptimeEl = document.getElementById('uptime');
+    const facebookStatus = document.getElementById('facebookStatus');
+    const srtStatusPill = document.getElementById('srtStatusPill');
+    const recordingsDirStatus = document.getElementById('recordingsDirStatus');
     const recordingsList = document.getElementById('recordingsList');
     const recordingsStatus = document.getElementById('recordingsStatus');
     const refreshRecordingsBtn = document.getElementById('refreshRecordingsBtn');
+    const selectedRecordingShell = document.getElementById('selectedRecordingShell');
+    const selectedRecordingName = document.getElementById('selectedRecordingName');
+    const selectedRecordingMeta = document.getElementById('selectedRecordingMeta');
+    const selectedRecordingPlayer = document.getElementById('selectedRecordingPlayer');
+    const selectedRecordingDownload = document.getElementById('selectedRecordingDownload');
+    const selectedRecordingDelete = document.getElementById('selectedRecordingDelete');
+    const selectedRecordingClose = document.getElementById('selectedRecordingClose');
     
     // AutoDJ & SRT Controls
     const autodjToggle = document.getElementById('autodjToggle');
     const srtToggle = document.getElementById('srtToggle');
     const logoutBtn = document.getElementById('logoutBtn');
     let isFetchingStatus = false;
+    let currentRecording = null;
 
     playBtn.addEventListener('click', async () => {
       try {
@@ -507,6 +599,12 @@
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+    }
+
+    function setMiniStatus(el, mode, label) {
+      el.classList.remove('ok', 'warn', 'bad');
+      el.classList.add(mode);
+      el.querySelector('span:last-child').textContent = label;
     }
 
     // Auth Helper
@@ -610,12 +708,76 @@
       if (res && res.ok) {
         const data = await res.json();
         srtToggle.checked = data.isRunning;
+        setMiniStatus(srtStatusPill, data.isRunning ? 'ok' : 'bad', `SRT: ${data.isRunning ? 'activo' : 'detenido'}`);
       }
+    }
+
+    async function refreshSystemStatus() {
+      try {
+        const res = await fetch('/api/system/status', { cache: 'no-store' });
+        if (!res.ok) {
+          setMiniStatus(facebookStatus, 'warn', 'Facebook: sin datos');
+          setMiniStatus(srtStatusPill, 'warn', 'SRT: sin datos');
+          setMiniStatus(recordingsDirStatus, 'warn', 'Grabaciones: sin datos');
+          return;
+        }
+
+        const data = await res.json();
+        setMiniStatus(facebookStatus, data.facebookConfigured ? 'ok' : 'bad', `Facebook: ${data.facebookConfigured ? 'configurado' : 'faltante'}`);
+        setMiniStatus(recordingsDirStatus, data.recordingsConfigured ? 'ok' : 'warn', `Grabaciones: ${data.recordingsDir || 'no disponible'}`);
+        if (!data.srtConfigured) {
+          setMiniStatus(srtStatusPill, 'warn', 'SRT: sin passphrase');
+        }
+      } catch (err) {
+        setMiniStatus(facebookStatus, 'warn', 'Facebook: error');
+        setMiniStatus(srtStatusPill, 'warn', 'SRT: error');
+        setMiniStatus(recordingsDirStatus, 'warn', 'Grabaciones: error');
+      }
+    }
+
+    function clearSelectedRecording() {
+      currentRecording = null;
+      selectedRecordingShell.classList.remove('visible');
+      selectedRecordingName.textContent = 'Seleccioná una grabación';
+      selectedRecordingMeta.textContent = '-';
+      selectedRecordingPlayer.removeAttribute('src');
+      selectedRecordingPlayer.load();
+      selectedRecordingDownload.href = '#';
+      selectedRecordingDelete.dataset.name = '';
+    }
+
+    function showRecording(item) {
+      currentRecording = item;
+      selectedRecordingName.textContent = item.name;
+      selectedRecordingMeta.textContent = item.metaText || `${formatFileSize(item.size)} · ${new Date(item.mtime).toLocaleString('es-ES')}`;
+      selectedRecordingPlayer.src = item.playUrl;
+      selectedRecordingPlayer.load();
+      selectedRecordingDownload.href = item.downloadUrl;
+      selectedRecordingDelete.dataset.name = item.name;
+      selectedRecordingShell.classList.add('visible');
+    }
+
+    async function deleteRecording(name) {
+      if (!name) return;
+      if (!confirm(`¿Eliminar definitivamente "${name}"?`)) return;
+
+      const res = await apiCall(`/api/recordings/${encodeURIComponent(name)}`, 'DELETE');
+      if (!res || !res.ok) {
+        alert('No se pudo eliminar el video.');
+        return;
+      }
+
+      if (currentRecording && currentRecording.name === name) {
+        clearSelectedRecording();
+      }
+
+      await loadRecordings();
     }
 
     async function loadRecordings() {
       recordingsStatus.textContent = 'Cargando...';
       recordingsList.innerHTML = '';
+      clearSelectedRecording();
 
       const res = await apiCall('/api/recordings', 'GET');
       if (!res || !res.ok) {
@@ -630,23 +792,20 @@
         : `No hay grabaciones todavía en ${data.recordingsDir}`;
 
       if (!recordings.length) {
-        recordingsList.innerHTML = '';
         return;
       }
 
       recordingsList.innerHTML = recordings.map((item) => `
-        <article class="recording-item">
-          <div>
+        <article class="recording-item compact" data-name="${escapeHtml(item.name)}" data-size="${item.size}" data-mtime="${escapeHtml(item.mtime)}">
+          <div class="recording-title">
             <strong>${escapeHtml(item.name)}</strong>
-            <div class="recording-meta">
-              <span>${formatFileSize(item.size)}</span>
-              <span>${new Date(item.mtime).toLocaleString('es-ES')}</span>
-            </div>
+            <span class="cmd-desc">${formatFileSize(item.size)} · ${new Date(item.mtime).toLocaleString('es-ES')}</span>
           </div>
-          <video class="recording-player" controls preload="metadata" src="${item.playUrl}" playsinline></video>
           <div class="recording-actions">
-            <a class="btn" href="${item.playUrl}" target="_blank" rel="noopener">Abrir privado</a>
+            <button type="button" data-action="select" data-name="${escapeHtml(item.name)}">Ver</button>
+            <a class="btn" href="${item.playUrl}" target="_blank" rel="noopener">Abrir</a>
             <a class="btn" href="${item.downloadUrl}">Descargar</a>
+            <button type="button" data-action="delete" data-name="${escapeHtml(item.name)}" style="background: rgba(239,68,68,0.16); border: 1px solid rgba(239,68,68,0.35);">Eliminar</button>
           </div>
         </article>
       `).join('');
@@ -654,6 +813,39 @@
 
     refreshRecordingsBtn.addEventListener('click', () => {
       loadRecordings();
+    });
+
+    recordingsList.addEventListener('click', (event) => {
+      const control = event.target.closest('[data-action]');
+      if (!control) return;
+
+      const { action, name } = control.dataset;
+      if (action === 'select') {
+        const item = Array.from(recordingsList.querySelectorAll('.recording-item')).find((node) => node.dataset.name === name);
+        if (!item) return;
+        const metaText = item.querySelector('.cmd-desc')?.textContent || '-';
+        showRecording({
+          name,
+          size: Number(item.dataset.size || 0),
+          mtime: item.dataset.mtime || new Date().toISOString(),
+          metaText,
+          playUrl: `/api/recordings/${encodeURIComponent(name)}/play`,
+          downloadUrl: `/api/recordings/${encodeURIComponent(name)}/download`
+        });
+        return;
+      }
+
+      if (action === 'delete') {
+        deleteRecording(name);
+      }
+    });
+
+    selectedRecordingClose.addEventListener('click', () => {
+      clearSelectedRecording();
+    });
+
+    selectedRecordingDelete.addEventListener('click', () => {
+      deleteRecording(selectedRecordingDelete.dataset.name);
     });
 
     async function refreshStatus() {
@@ -686,10 +878,10 @@
       if (authHeader && !autodjToggle.disabled) {
         refreshAutoDjStatus();
         if (!srtToggle.disabled) refreshSrtStatus();
-        loadRecordings();
       } else {
         recordingsStatus.textContent = 'Iniciá sesión de admin para ver los videos guardados.';
       }
+      refreshSystemStatus();
     }
 
     refreshStatus();

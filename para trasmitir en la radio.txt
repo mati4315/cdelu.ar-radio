@@ -1,3 +1,12 @@
+srt://212.147.253.221:8890?passphrase=cdelu-radio-2026&latency=300000
+solo colocar eso en el OBS
+
+
+la Key de facebook se encuentra en el archivo 
+.env
+
+
+
 srt://radio.cdelu.io:8890?mode=caller
 
 

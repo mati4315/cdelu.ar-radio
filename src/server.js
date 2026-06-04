@@ -24,7 +24,11 @@ const HOST = process.env.HOST || '0.0.0.0';
 const SOURCE_USER = process.env.SOURCE_USER || '';
 const SOURCE_PASS = process.env.SOURCE_PASS || '';
 const STREAM_NAME = process.env.STREAM_NAME || 'Radio Live';
-const OFFLINE_TIMEOUT_MS = Number(process.env.OFFLINE_TIMEOUT_MS || 12000);
+const FACEBOOK_KEY = process.env.FACEBOOK_KEY || '';
+const SRT_PASSPHRASE = process.env.SRT_PASSPHRASE || '';
+// Give the source a generous window before we consider it offline.
+// Short stalls on the network or encoder should not tear down the stream.
+const OFFLINE_TIMEOUT_MS = Number(process.env.OFFLINE_TIMEOUT_MS || 600000);
 const MAX_BUFFER_MB = Number(process.env.MAX_BUFFER_MB || 50);
 const BUFFER_CHUNKS = Math.max(1, Number(process.env.BUFFER_CHUNKS || 64));
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || '/opt/radio-relay/recordings';
@@ -434,6 +438,20 @@ app.get('/api/srt/status', async (request, reply) => {
   }
 });
 
+app.get('/api/system/status', async (request, reply) => {
+  try {
+    return {
+      facebookConfigured: Boolean(FACEBOOK_KEY && FACEBOOK_KEY !== 'TU_CLAVE_DE_TRANSMISION'),
+      srtConfigured: Boolean(SRT_PASSPHRASE),
+      recordingsConfigured: Boolean(RECORDINGS_DIR),
+      recordingsDir: RECORDINGS_DIR
+    };
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ error: 'Failed to get system status' });
+  }
+});
+
 app.get('/api/recordings', async (request, reply) => {
   try {
     if (!isAdminAuthorized(request)) {
@@ -474,6 +492,27 @@ app.get('/api/recordings/:name/download', async (request, reply) => {
     .header('Content-Length', stats.size);
 
   return reply.send(createReadStream(filePath));
+});
+
+app.delete('/api/recordings/:name', async (request, reply) => {
+  const filePath = resolveRecordingPath(request.params.name);
+  if (!filePath) {
+    return reply.code(404).send({ error: 'Recording not found' });
+  }
+
+  const token = request.query.token || '';
+  if (!isAdminAuthorized(request) && !isValidRecordingToken(path.basename(filePath), 'delete', token)) {
+    return reply.code(401).send({ error: 'Unauthorized' });
+  }
+
+  try {
+    fs.unlinkSync(filePath);
+    request.log.info({ file: filePath }, 'recording deleted');
+    return { success: true, deleted: path.basename(filePath) };
+  } catch (err) {
+    request.log.error({ err, file: filePath }, 'failed to delete recording');
+    return reply.code(500).send({ error: 'Failed to delete recording' });
+  }
 });
 
 app.get('/api/recordings/:name/play', async (request, reply) => {
@@ -569,36 +608,6 @@ app.post('/api/srt', async (request, reply) => {
 });
 
 app.get('/healthz', async () => ({ ok: true }));
-
-// ── Recordings API ──────────────────────────────────────────────────────────
-const fs = require('node:fs');
-const RECORDINGS_DIR = path.join(__dirname, '..', 'public', 'recordings');
-
-app.get('/api/recordings', async (request, reply) => {
-  try {
-    if (!fs.existsSync(RECORDINGS_DIR)) {
-      return { recordings: [] };
-    }
-    const files = fs.readdirSync(RECORDINGS_DIR)
-      .filter(f => f.endsWith('.mp4'))
-      .map(f => {
-        const stat = fs.statSync(path.join(RECORDINGS_DIR, f));
-        return {
-          filename: f,
-          url: `/recordings/${f}`,
-          sizeMB: (stat.size / 1024 / 1024).toFixed(2),
-          date: stat.mtime.toISOString()
-        };
-      })
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
-    return { recordings: files };
-  } catch (err) {
-    request.log.error(err);
-    return reply.code(500).send({ error: 'Failed to list recordings' });
-  }
-});
-
-
 // Graceful shutdown
 const gracefulShutdown = async (signal) => {
   app.log.info({ signal }, 'received shutdown signal');
