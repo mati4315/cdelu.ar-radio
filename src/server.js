@@ -1,9 +1,12 @@
 'use strict';
 
 const path = require('node:path');
+const fs = require('node:fs');
+const { createReadStream, existsSync, readdirSync, statSync } = fs;
 const { exec } = require('node:child_process');
+const { spawn } = require('node:child_process');
+const crypto = require('node:crypto');
 const util = require('node:util');
-const { existsSync } = require('node:fs');
 const Fastify = require('fastify');
 const fastifyStatic = require('@fastify/static');
 const dotenv = require('dotenv');
@@ -24,6 +27,7 @@ const STREAM_NAME = process.env.STREAM_NAME || 'Radio Live';
 const OFFLINE_TIMEOUT_MS = Number(process.env.OFFLINE_TIMEOUT_MS || 12000);
 const MAX_BUFFER_MB = Number(process.env.MAX_BUFFER_MB || 50);
 const BUFFER_CHUNKS = Math.max(1, Number(process.env.BUFFER_CHUNKS || 64));
+const RECORDINGS_DIR = process.env.RECORDINGS_DIR || '/opt/radio-relay/recordings';
 
 const serverFactory = (handler, opts) => {
   const server = require('node:http').createServer((req, res) => {
@@ -108,6 +112,80 @@ function safeEnd(res) {
   }
 }
 
+function isPathInside(baseDir, targetPath) {
+  const relative = path.relative(baseDir, targetPath);
+  return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function listRecordings() {
+  if (!existsSync(RECORDINGS_DIR)) {
+    return [];
+  }
+
+  return readdirSync(RECORDINGS_DIR)
+    .map((name) => {
+      const fullPath = path.join(RECORDINGS_DIR, name);
+      const stats = statSync(fullPath);
+      return {
+        name,
+        size: stats.size,
+        mtime: stats.mtime.toISOString(),
+        ext: path.extname(name).toLowerCase(),
+        downloadUrl: `/api/recordings/${encodeURIComponent(name)}/download`,
+        playUrl: `/api/recordings/${encodeURIComponent(name)}/play`
+      };
+    })
+    .filter((item) => item.ext === '.mkv' || item.ext === '.mp4' || item.ext === '.webm')
+    .sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+}
+
+function resolveRecordingPath(name) {
+  const safeName = path.basename(name || '');
+  const fullPath = path.join(RECORDINGS_DIR, safeName);
+  if (!safeName || !isPathInside(RECORDINGS_DIR, fullPath)) {
+    return null;
+  }
+  if (!existsSync(fullPath)) {
+    return null;
+  }
+  return fullPath;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function getAdminExpectedAuth() {
+  return `Basic ${Buffer.from(`${SOURCE_USER}:${SOURCE_PASS}`).toString('base64')}`;
+}
+
+function isAdminAuthorized(request) {
+  const auth = request.headers.authorization || '';
+  return Boolean(SOURCE_USER && SOURCE_PASS && auth === getAdminExpectedAuth());
+}
+
+function signRecording(name, purpose) {
+  return crypto.createHmac('sha256', SOURCE_PASS).update(`${purpose}:${name}`).digest('hex');
+}
+
+function isValidRecordingToken(name, purpose, token) {
+  if (!token || !SOURCE_PASS) {
+    return false;
+  }
+  const expected = signRecording(name, purpose);
+  const tokenBuf = Buffer.from(String(token));
+  const expectedBuf = Buffer.from(expected);
+  if (tokenBuf.length !== expectedBuf.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(tokenBuf, expectedBuf);
+}
+
 function isLive() {
   if (!sourceReq) {
     return false;
@@ -145,15 +223,12 @@ app.addHook('onRequest', async (request, reply) => {
   const isAdminEndpoint = request.url.startsWith('/api/autodj') || request.url.startsWith('/api/srt');
 
   if (isSourceEndpoint || isAdminEndpoint) {
-    const auth = request.headers.authorization || '';
-    const expected = `Basic ${Buffer.from(`${SOURCE_USER}:${SOURCE_PASS}`).toString('base64')}`;
-
     if (!SOURCE_USER || !SOURCE_PASS) {
       request.log.error('SOURCE_USER/SOURCE_PASS not configured');
       return reply.code(500).send({ error: 'Server not configured for source auth' });
     }
 
-    if (auth !== expected) {
+    if (!isAdminAuthorized(request)) {
       reply.header('WWW-Authenticate', 'Basic realm="radio-admin"');
       return reply.code(401).send({ error: 'Unauthorized' });
     }
@@ -357,6 +432,107 @@ app.get('/api/srt/status', async (request, reply) => {
     request.log.error(err);
     return reply.code(500).send({ error: 'Failed to get pm2 status' });
   }
+});
+
+app.get('/api/recordings', async (request, reply) => {
+  try {
+    if (!isAdminAuthorized(request)) {
+      reply.header('WWW-Authenticate', 'Basic realm="radio-admin"');
+      return reply.code(401).send({ error: 'Unauthorized' });
+    }
+
+    return {
+      recordings: listRecordings().map((item) => ({
+        ...item,
+        downloadUrl: `/api/recordings/${encodeURIComponent(item.name)}/download?token=${signRecording(item.name, 'download')}`,
+        playUrl: `/api/recordings/${encodeURIComponent(item.name)}/play?token=${signRecording(item.name, 'play')}`
+      })),
+      recordingsDir: RECORDINGS_DIR
+    };
+  } catch (err) {
+    request.log.error({ err }, 'failed to list recordings');
+    return reply.code(500).send({ error: 'Failed to list recordings' });
+  }
+});
+
+app.get('/api/recordings/:name/download', async (request, reply) => {
+  const filePath = resolveRecordingPath(request.params.name);
+  if (!filePath) {
+    return reply.code(404).send({ error: 'Recording not found' });
+  }
+
+  const token = request.query.token || '';
+  if (!isAdminAuthorized(request) && !isValidRecordingToken(path.basename(filePath), 'download', token)) {
+    return reply.code(401).send({ error: 'Unauthorized' });
+  }
+
+  const fileName = path.basename(filePath);
+  const stats = statSync(filePath);
+  reply
+    .header('Content-Type', 'application/octet-stream')
+    .header('Content-Disposition', `attachment; filename="${fileName}"`)
+    .header('Content-Length', stats.size);
+
+  return reply.send(createReadStream(filePath));
+});
+
+app.get('/api/recordings/:name/play', async (request, reply) => {
+  const filePath = resolveRecordingPath(request.params.name);
+  if (!filePath) {
+    return reply.code(404).send({ error: 'Recording not found' });
+  }
+
+  const token = request.query.token || '';
+  if (!isAdminAuthorized(request) && !isValidRecordingToken(path.basename(filePath), 'play', token)) {
+    return reply.code(401).send({ error: 'Unauthorized' });
+  }
+
+  reply.raw.writeHead(200, {
+    'Content-Type': 'video/mp4',
+    'Cache-Control': 'no-store',
+    'Connection': 'keep-alive'
+  });
+
+  const ffmpegArgs = [
+    '-i', filePath,
+    '-map', '0:v:0',
+    '-map', '0:a:0',
+    '-c:v', 'copy',
+    '-c:a', 'aac',
+    '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+    '-f', 'mp4',
+    'pipe:1'
+  ];
+
+  const ffmpeg = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+
+  ffmpeg.stdout.pipe(reply.raw);
+  ffmpeg.stderr.on('data', (data) => {
+    request.log.debug({ data: data.toString() }, 'ffmpeg playback');
+  });
+
+  const cleanup = () => {
+    try {
+      ffmpeg.kill('SIGTERM');
+    } catch (_) {
+      // ignore
+    }
+    safeEnd(reply.raw);
+  };
+
+  request.raw.once('close', cleanup);
+  request.raw.once('error', cleanup);
+
+  ffmpeg.on('close', () => {
+    safeEnd(reply.raw);
+  });
+
+  ffmpeg.on('error', (err) => {
+    request.log.error({ err }, 'failed to spawn ffmpeg for recording playback');
+    safeEnd(reply.raw);
+  });
+
+  return reply;
 });
 
 app.post('/api/srt', async (request, reply) => {

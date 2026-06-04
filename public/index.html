@@ -227,6 +227,49 @@
       border: 1px solid rgba(110, 231, 183, 0.2);
     }
 
+    .recordings-list {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .recording-item {
+      background: rgba(0,0,0,0.2);
+      border: 1px solid var(--border);
+      padding: 1rem;
+      border-radius: 12px;
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .recording-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+      flex-wrap: wrap;
+    }
+
+    .recording-actions {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .recording-actions a,
+    .recording-actions button {
+      flex: unset;
+      padding: 0.65rem 1rem;
+      font-size: 0.9rem;
+    }
+
+    .recording-player {
+      width: 100%;
+      border-radius: 12px;
+      background: #000;
+      min-height: 220px;
+    }
+
     /* Switch CSS */
     .switch-container {
       display: flex;
@@ -366,6 +409,17 @@
       </div>
     </div>
 
+    <!-- Recordings Section -->
+    <div class="card">
+      <h2 class="card-title">🎞 Grabaciones del VPS</h2>
+      <div class="cmd-desc" style="margin-bottom: 1rem;">Archivos guardados por OBS en el VPS. Necesitás sesión de admin para verlos.</div>
+      <div class="actions" style="margin-top: 0; margin-bottom: 1rem;">
+        <button id="refreshRecordingsBtn" type="button">Actualizar lista</button>
+      </div>
+      <div id="recordingsStatus" class="cmd-desc" style="margin-bottom: 1rem;">Cargando...</div>
+      <div id="recordingsList" class="recordings-list"></div>
+    </div>
+
     <!-- Cheat Sheet Section -->
     <div class="card">
       <h2 class="card-title">💻 Comandos (Cheat Sheet)</h2>
@@ -402,6 +456,9 @@
     const listenersEl = document.getElementById('listeners');
     const bytesEl = document.getElementById('bytes');
     const uptimeEl = document.getElementById('uptime');
+    const recordingsList = document.getElementById('recordingsList');
+    const recordingsStatus = document.getElementById('recordingsStatus');
+    const refreshRecordingsBtn = document.getElementById('refreshRecordingsBtn');
     
     // AutoDJ & SRT Controls
     const autodjToggle = document.getElementById('autodjToggle');
@@ -429,6 +486,27 @@
       if (!isoString) return '-';
       const d = new Date(isoString);
       return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' - ' + d.toLocaleDateString('es-ES');
+    }
+
+    function formatFileSize(bytes) {
+      if (!bytes) return '0 B';
+      const units = ['B', 'KB', 'MB', 'GB'];
+      let size = bytes;
+      let unit = 0;
+      while (size >= 1024 && unit < units.length - 1) {
+        size /= 1024;
+        unit += 1;
+      }
+      return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
     }
 
     // Auth Helper
@@ -535,6 +613,49 @@
       }
     }
 
+    async function loadRecordings() {
+      recordingsStatus.textContent = 'Cargando...';
+      recordingsList.innerHTML = '';
+
+      const res = await apiCall('/api/recordings', 'GET');
+      if (!res || !res.ok) {
+        recordingsStatus.textContent = 'No pude cargar la lista. Iniciá sesión de admin y probá otra vez.';
+        return;
+      }
+
+      const data = await res.json();
+      const recordings = data.recordings || [];
+      recordingsStatus.textContent = recordings.length
+        ? `${recordings.length} archivo(s) en ${data.recordingsDir}`
+        : `No hay grabaciones todavía en ${data.recordingsDir}`;
+
+      if (!recordings.length) {
+        recordingsList.innerHTML = '';
+        return;
+      }
+
+      recordingsList.innerHTML = recordings.map((item) => `
+        <article class="recording-item">
+          <div>
+            <strong>${escapeHtml(item.name)}</strong>
+            <div class="recording-meta">
+              <span>${formatFileSize(item.size)}</span>
+              <span>${new Date(item.mtime).toLocaleString('es-ES')}</span>
+            </div>
+          </div>
+          <video class="recording-player" controls preload="metadata" src="${item.playUrl}" playsinline></video>
+          <div class="recording-actions">
+            <a class="btn" href="${item.playUrl}" target="_blank" rel="noopener">Abrir privado</a>
+            <a class="btn" href="${item.downloadUrl}">Descargar</a>
+          </div>
+        </article>
+      `).join('');
+    }
+
+    refreshRecordingsBtn.addEventListener('click', () => {
+      loadRecordings();
+    });
+
     async function refreshStatus() {
       try {
         const res = await fetch('/status', { cache: 'no-store' });
@@ -565,6 +686,9 @@
       if (authHeader && !autodjToggle.disabled) {
         refreshAutoDjStatus();
         if (!srtToggle.disabled) refreshSrtStatus();
+        loadRecordings();
+      } else {
+        recordingsStatus.textContent = 'Iniciá sesión de admin para ver los videos guardados.';
       }
     }
 

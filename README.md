@@ -6,6 +6,10 @@ Relay MP3 liviano para radio online:
 - `GET /live.mp3` (público): reproducción continua
 - `GET /status` (público): estado `live/offline`
 - `GET /healthz` (público): health check
+- `restream.sh` puede guardar una copia local del video SRT de OBS en el VPS
+- `GET /api/recordings` (privado): lista de videos grabados en el VPS
+- `GET /api/recordings/:name/download` (privado): descarga del archivo original
+- `GET /api/recordings/:name/play` (privado): reproducción privada en navegador
 
 ## 1) Desarrollo local
 
@@ -73,7 +77,18 @@ SOURCE_PASS=tu_password_source_muy_fuerte
 STREAM_NAME=Tu Radio
 OFFLINE_TIMEOUT_MS=12000
 BUFFER_CHUNKS=64
+RECORDINGS_DIR=/opt/radio-relay/recordings
 ```
+
+La grabación del video de OBS se guarda como `.mkv` con nombre por fecha y hora dentro de `RECORDINGS_DIR`.
+
+### Ver videos guardados
+
+Con sesión de admin en el dashboard:
+
+1. Abrí la tarjeta "Grabaciones del VPS".
+2. Tocá "Actualizar lista" para ver los archivos.
+3. Usá "Abrir privado" para reproducir en navegador o "Descargar" para bajarlo a tu PC.
 
 ### 2.5 Levantar app 24/7
 

@@ -1,26 +1,33 @@
 #!/bin/bash
-# Restreamer SRT → Facebook Live + Radio Web
+# Restreamer SRT -> Facebook Live + Radio Web
 
 ENV_FILE="${ENV_FILE:-./.env}"
 SOURCE_URL="${SOURCE_URL:-http://127.0.0.1:3000/source}"
+RECORDINGS_DIR="${RECORDINGS_DIR:-/opt/radio-relay/recordings}"
 
 # Cargar credenciales desde .env
 SOURCE_USER=""
 SOURCE_PASS=""
 SRT_PASSPHRASE=""
+RECORDINGS_DIR_FROM_ENV=""
 if [ -f "$ENV_FILE" ]; then
   while IFS='=' read -r key value; do
     case "$key" in
       SOURCE_USER) SOURCE_USER="$value" ;;
       SOURCE_PASS) SOURCE_PASS="$value" ;;
       SRT_PASSPHRASE) SRT_PASSPHRASE="$value" ;;
+      RECORDINGS_DIR) RECORDINGS_DIR_FROM_ENV="$value" ;;
     esac
-  done < <(grep -E '^(SOURCE_USER|SOURCE_PASS|SRT_PASSPHRASE)=' "$ENV_FILE" 2>/dev/null || true)
+  done < <(grep -E '^(SOURCE_USER|SOURCE_PASS|SRT_PASSPHRASE|RECORDINGS_DIR)=' "$ENV_FILE" 2>/dev/null || true)
 fi
 
 if [ -z "$SOURCE_USER" ] || [ -z "$SOURCE_PASS" ]; then
   echo "ERROR: No se encontraron SOURCE_USER/SOURCE_PASS en $ENV_FILE"
   exit 1
+fi
+
+if [ -n "$RECORDINGS_DIR_FROM_ENV" ]; then
+  RECORDINGS_DIR="$RECORDINGS_DIR_FROM_ENV"
 fi
 
 # --- CONFIGURAR FACEBOOK ---
@@ -42,22 +49,20 @@ else
   echo "Esperando conexión SRT de OBS en el puerto $SRT_PORT (sin passphrase)..."
 fi
 
-# Directorio de grabaciones (servido por el servidor web)
-RECORDINGS_DIR="/var/www/radio/public/recordings"
 mkdir -p "$RECORDINGS_DIR"
 
 # Bucle de reconexión automática: si ffmpeg/curl se cae, vuelve a intentarlo
 while true; do
-  RECORDING_FILE="${RECORDINGS_DIR}/$(date +%Y-%m-%d_%H-%M-%S).mp4"
-  echo "[$(date -u +%FT%TZ)] Iniciando pipeline SRT... Grabando en: $RECORDING_FILE"
+  RECORDING_FILE="${RECORDINGS_DIR}/obs-$(date +%Y-%m-%d_%H-%M-%S).mkv"
+  echo "[$(date -u +%FT%TZ)] Iniciando pipeline SRT..."
+  echo "Grabación local en VPS: $RECORDING_FILE"
 
   if [ "$FACEBOOK_KEY" != "TU_CLAVE_DE_TRANSMISION" ]; then
-    # MODO DUAL: Facebook Live + Radio Web + Grabación
     ffmpeg \
       -i "${SRT_LISTENER_URL}" \
-      -map 0 -c copy -f flv "${FACEBOOK_URL}${FACEBOOK_KEY}" \
-      -map 0:a -c:a libmp3lame -b:a 128k -f mp3 - \
-      -map 0 -c copy -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof "$RECORDING_FILE" \
+      -c copy -f flv "${FACEBOOK_URL}${FACEBOOK_KEY}" \
+      -map 0:v:0 -map 0:a:0 -c copy -f matroska "$RECORDING_FILE" \
+      -vn -c:a libmp3lame -b:a 128k -f mp3 - \
       2>>/tmp/ffmpeg-restream.log | \
     curl \
       -v \
@@ -75,11 +80,10 @@ while true; do
       "$SOURCE_URL" \
       2>>/tmp/curl-restream.log
   else
-    # MODO SOLO RADIO: Sin Facebook + Grabación
     ffmpeg \
       -i "${SRT_LISTENER_URL}" \
-      -map 0:a -c:a libmp3lame -b:a 128k -f mp3 - \
-      -map 0 -c copy -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof "$RECORDING_FILE" \
+      -map 0:v:0 -map 0:a:0 -c copy -f matroska "$RECORDING_FILE" \
+      -vn -c:a libmp3lame -b:a 128k -f mp3 - \
       2>>/tmp/ffmpeg-restream.log | \
     curl \
       -v \
