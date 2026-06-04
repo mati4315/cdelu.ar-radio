@@ -7,6 +7,8 @@ Esta guía explica cómo configurar OBS Studio para transmitir hacia el servidor
 ## 1. Configuración de Conexión (SRT)
 OBS Studio cuenta con soporte nativo para SRT, por lo que **no requieres instalar plugins**.
 
+> Si la conexión se corta, prueba `latency=3000000` en la URL SRT y baja temporalmente el bitrate de OBS a `4500` o `5000 Kbps` para estabilizar la prueba.
+
 1. Abre OBS Studio y ve a **Ajustes** -> **Emisión**.
 2. **Servicio:** Selecciona `Personalizado`.
 3. **Servidor:** Escribe exactamente `srt://radio.cdelu.io:8890?mode=caller`

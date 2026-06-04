@@ -50,10 +50,10 @@ SRT_PORT="${SRT_PORT:-8890}"
 
 # Construir URL SRT con o sin passphrase
 if [ -n "$SRT_PASSPHRASE" ]; then
-  SRT_LISTENER_URL="srt://0.0.0.0:${SRT_PORT}?mode=listener&latency=1000000&passphrase=${SRT_PASSPHRASE}"
+  SRT_LISTENER_URL="srt://0.0.0.0:${SRT_PORT}?mode=listener&latency=3000000&passphrase=${SRT_PASSPHRASE}"
   echo "Esperando conexión SRT de OBS en el puerto $SRT_PORT (con passphrase)..."
 else
-  SRT_LISTENER_URL="srt://0.0.0.0:${SRT_PORT}?mode=listener&latency=1000000"
+  SRT_LISTENER_URL="srt://0.0.0.0:${SRT_PORT}?mode=listener&latency=3000000"
   echo "Esperando conexión SRT de OBS en el puerto $SRT_PORT (sin passphrase)..."
 fi
 
@@ -63,50 +63,32 @@ RECORDING_FILE="${RECORDINGS_DIR}/obs-$(date +%Y-%m-%d_%H-%M-%S).mkv"
 echo "[$(date -u +%FT%TZ)] Iniciando pipeline SRT..."
 echo "Grabación local en VPS: $RECORDING_FILE"
 
+TEE_OUTPUTS="[f=matroska]$RECORDING_FILE"
 if [ "$FACEBOOK_KEY" != "TU_CLAVE_DE_TRANSMISION" ]; then
-  ffmpeg \
-    -i "${SRT_LISTENER_URL}" \
-    -map 0:v:0 -map 0:a:0 -c copy -f flv "${FACEBOOK_URL}${FACEBOOK_KEY}" \
-    -map 0:v:0 -map 0:a:0 -c copy -f matroska "$RECORDING_FILE" \
-    -vn -c:a libmp3lame -b:a 128k -f mp3 - \
-    2>>/tmp/ffmpeg-restream.log | \
-  curl \
-    -v \
-    -X PUT \
-    -H 'Content-Type: application/octet-stream' \
-    -H 'Transfer-Encoding: chunked' \
-    -H 'Connection: keep-alive' \
-    --keepalive-time 30 \
-    --speed-limit 0 \
-    --speed-time 0 \
-    --max-time 0 \
-    --no-buffer \
-    -u "${SOURCE_USER}:${SOURCE_PASS}" \
-    -T - \
-    "$SOURCE_URL" \
-    2>>/tmp/curl-restream.log
-else
-  ffmpeg \
-    -i "${SRT_LISTENER_URL}" \
-    -map 0:v:0 -map 0:a:0 -c copy -f matroska "$RECORDING_FILE" \
-    -vn -c:a libmp3lame -b:a 128k -f mp3 - \
-    2>>/tmp/ffmpeg-restream.log | \
-  curl \
-    -v \
-    -X PUT \
-    -H 'Content-Type: application/octet-stream' \
-    -H 'Transfer-Encoding: chunked' \
-    -H 'Connection: keep-alive' \
-    --keepalive-time 30 \
-    --speed-limit 0 \
-    --speed-time 0 \
-    --max-time 0 \
-    --no-buffer \
-    -u "${SOURCE_USER}:${SOURCE_PASS}" \
-    -T - \
-    "$SOURCE_URL" \
-    2>>/tmp/curl-restream.log
+  TEE_OUTPUTS="[onfail=ignore:use_fifo=1:f=flv]${FACEBOOK_URL}${FACEBOOK_KEY}|$TEE_OUTPUTS"
 fi
+
+ffmpeg \
+  -i "${SRT_LISTENER_URL}" \
+  -filter_complex "[0:a]asplit=2[a_radio][a_av]" \
+  -map 0:v:0 -map "[a_av]" -c:v copy -c:a aac -b:a 160k -f tee "$TEE_OUTPUTS" \
+  -map "[a_radio]" -c:a libmp3lame -b:a 128k -f mp3 - \
+  2>>/tmp/ffmpeg-restream.log | \
+curl \
+  -v \
+  -X PUT \
+  -H 'Content-Type: application/octet-stream' \
+  -H 'Transfer-Encoding: chunked' \
+  -H 'Connection: keep-alive' \
+  --keepalive-time 30 \
+  --speed-limit 0 \
+  --speed-time 0 \
+  --max-time 0 \
+  --no-buffer \
+  -u "${SOURCE_USER}:${SOURCE_PASS}" \
+  -T - \
+  "$SOURCE_URL" \
+  2>>/tmp/curl-restream.log
 
 EXIT_CODE=$?
 echo "[$(date -u +%FT%TZ)] Pipeline terminó (código $EXIT_CODE)."
