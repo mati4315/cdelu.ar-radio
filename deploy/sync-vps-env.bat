@@ -31,8 +31,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Reiniciando srt-listener...
-ssh -i "%SSH_KEY%" -o StrictHostKeyChecking=no root@%VPS_IP% "cd /var/www/radio && pm2 restart srt-listener --update-env"
+echo Asegurando Facebook deshabilitado salvo que se active explicitamente...
+ssh -i "%SSH_KEY%" -o StrictHostKeyChecking=no root@%VPS_IP% "cd /var/www/radio && grep -q '^FACEBOOK_ENABLE=' .env || printf '\nFACEBOOK_ENABLE=0\n' >> .env"
+if errorlevel 1 (
+  echo ERROR: No se pudo asegurar FACEBOOK_ENABLE=0.
+  exit /b 1
+)
+
+echo Reiniciando srt-listener y apagando Auto-DJ...
+ssh -i "%SSH_KEY%" -o StrictHostKeyChecking=no root@%VPS_IP% "cd /var/www/radio && pm2 stop radio-loop && pm2 restart srt-listener --update-env && pm2 save"
 if errorlevel 1 (
   echo ERROR: No se pudo reiniciar srt-listener.
   exit /b 1
