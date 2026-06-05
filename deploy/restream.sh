@@ -53,13 +53,13 @@ fi
 echo "[$(date -u +%FT%TZ)] Iniciando pipeline..."
 
 ffmpeg \
-  -hide_banner -nostats \
+  -hide_banner -nostats -loglevel warning \
   -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
   -i "$SRT_LISTENER_URL" \
   -map 0:v:0 -map 0:a:0 -c copy \
   -f tee "$TEE_OUTPUTS" \
   -map 0:a:0 -c:a libmp3lame -b:a 128k -f mp3 - \
-  2>>/tmp/ffmpeg-restream.log | \
+  2> >(sed -e "s#${FACEBOOK_URL:-}${FACEBOOK_KEY}#${FACEBOOK_URL:-}***REDACTED***#g" -e "s#${FACEBOOK_KEY}#***REDACTED***#g" >>/tmp/ffmpeg-restream.log) | \
 curl \
   --silent --show-error \
   -X PUT \

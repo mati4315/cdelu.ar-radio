@@ -71,6 +71,7 @@ if [ "$FACEBOOK_ENABLE" = "1" ] && [ "$FACEBOOK_KEY" != "TU_CLAVE_DE_TRANSMISION
 fi
 
 ffmpeg \
+  -hide_banner -nostats -loglevel warning \
   -i "${SRT_LISTENER_URL}" \
   -filter_complex "[0:a]asplit=2[a_radio][a_av]" \
   -map 0:v:0 -map "[a_av]" \
@@ -80,7 +81,7 @@ ffmpeg \
   -c:a aac -b:a 160k \
   -f tee "$TEE_OUTPUTS" \
   -map "[a_radio]" -c:a libmp3lame -b:a 128k -f mp3 - \
-  2>>/tmp/ffmpeg-restream.log | \
+  2> >(sed -e "s#${FACEBOOK_URL}${FACEBOOK_KEY}#${FACEBOOK_URL}***REDACTED***#g" -e "s#${FACEBOOK_KEY}#***REDACTED***#g" >>/tmp/ffmpeg-restream.log) | \
 curl \
   --silent --show-error \
   -X PUT \
