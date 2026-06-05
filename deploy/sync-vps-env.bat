@@ -31,8 +31,8 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Asegurando Facebook deshabilitado salvo que se active explicitamente...
-ssh -i "%SSH_KEY%" -o StrictHostKeyChecking=no root@%VPS_IP% "cd /var/www/radio && grep -q '^FACEBOOK_ENABLE=' .env || printf '\nFACEBOOK_ENABLE=0\n' >> .env"
+echo Asegurando Facebook deshabilitado y video bitrate por defecto...
+ssh -i "%SSH_KEY%" -o StrictHostKeyChecking=no root@%VPS_IP% "cd /var/www/radio && grep -q '^FACEBOOK_ENABLE=' .env || printf '\nFACEBOOK_ENABLE=0' >> .env && grep -q '^VIDEO_BITRATE=' .env || printf '\nVIDEO_BITRATE=4000k' >> .env"
 if errorlevel 1 (
   echo ERROR: No se pudo asegurar FACEBOOK_ENABLE=0.
   exit /b 1

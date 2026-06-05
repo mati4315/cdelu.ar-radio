@@ -11,6 +11,7 @@ SOURCE_PASS=""
 SRT_PASSPHRASE=""
 RECORDINGS_DIR_FROM_ENV=""
 FACEBOOK_KEY_FROM_ENV=""
+VIDEO_BITRATE="${VIDEO_BITRATE:-4000k}"
 FACEBOOK_ENABLE="${FACEBOOK_ENABLE:-0}"
 if [ -f "$ENV_FILE" ]; then
   while IFS='=' read -r key value; do
@@ -21,8 +22,9 @@ if [ -f "$ENV_FILE" ]; then
       RECORDINGS_DIR) RECORDINGS_DIR_FROM_ENV="$value" ;;
       FACEBOOK_KEY) FACEBOOK_KEY_FROM_ENV="$value" ;;
       FACEBOOK_ENABLE) FACEBOOK_ENABLE="$value" ;;
+      VIDEO_BITRATE) VIDEO_BITRATE="$value" ;;
     esac
-  done < <(grep -E '^(SOURCE_USER|SOURCE_PASS|SRT_PASSPHRASE|RECORDINGS_DIR|FACEBOOK_KEY|FACEBOOK_ENABLE)=' "$ENV_FILE" 2>/dev/null || true)
+  done < <(grep -E '^(SOURCE_USER|SOURCE_PASS|SRT_PASSPHRASE|RECORDINGS_DIR|FACEBOOK_KEY|FACEBOOK_ENABLE|VIDEO_BITRATE)=' "$ENV_FILE" 2>/dev/null || true)
 fi
 
 if [ -z "$SOURCE_USER" ] || [ -z "$SOURCE_PASS" ]; then
@@ -75,7 +77,7 @@ ffmpeg \
   -i "${SRT_LISTENER_URL}" \
   -filter_complex "[0:a]asplit=2[a_radio][a_av]" \
   -map 0:v:0 -map "[a_av]" \
-  -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p \
+  -c:v libx264 -preset veryfast -tune zerolatency -b:v ${VIDEO_BITRATE} -maxrate ${VIDEO_BITRATE} -bufsize ${VIDEO_BITRATE} -pix_fmt yuv420p \
   -profile:v high -g 60 -keyint_min 60 -sc_threshold 0 \
   -flags +global_header \
   -c:a aac -b:a 160k \
