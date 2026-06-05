@@ -42,6 +42,13 @@ const serverFactory = (handler, opts) => {
     }
     handler(req, res);
   });
+  // The /source endpoint is a long-lived streaming request. Disable HTTP
+  // timeouts so Node/Fastify does not cut the connection while ffmpeg/curl
+  // is waiting on the incoming SRT stream.
+  server.requestTimeout = 0;
+  server.headersTimeout = 0;
+  server.keepAliveTimeout = 0;
+  server.setTimeout(0);
   return server;
 };
 
@@ -262,15 +269,10 @@ app.route({
 
     request.log.info({ ip: request.ip, sourceConnectedAt }, 'source connected');
 
-    // Determine the data stream to read from.
-    // Fastify's content type parser may have already consumed request.raw,
-    // so we check if the body is a readable stream (e.g. from BUTT/Icecast).
-    // For curl with chunked transfer, request.raw is still readable.
-    const body = request.body;
-    const isBodyStream = body && typeof body.on === 'function' && typeof body.read === 'function';
-    const dataStream = isBodyStream ? body : rawReq;
-
-    request.log.info({ usingBodyStream: isBodyStream }, 'source data stream selected');
+    // For long-running streaming uploads we avoid Fastify's parsed body here
+    // and work directly with the raw HTTP request stream.
+    const dataStream = rawReq;
+    request.log.info('using raw request stream for source data');
 
     dataStream.on('data', (chunk) => {
       lastSeen = Date.now();
@@ -303,8 +305,7 @@ app.route({
       }
     });
 
-    // Resume the data stream in case it is paused (common with Fastify body streams)
-    if (isBodyStream && typeof dataStream.resume === 'function') {
+    if (typeof dataStream.resume === 'function') {
       dataStream.resume();
     }
 
@@ -409,6 +410,8 @@ app.post('/api/autodj', async (request, reply) => {
 
   try {
     if (action === 'start') {
+      await execAsync('pm2 stop srt-listener');
+      try { await execAsync('pkill -f "ffmpeg.*srt"'); } catch(e) {}
       await execAsync('pm2 start radio-loop');
     } else if (action === 'stop') {
       await execAsync('pm2 stop radio-loop');
@@ -593,6 +596,9 @@ app.post('/api/srt', async (request, reply) => {
 
   try {
     if (action === 'start') {
+      await execAsync('pm2 stop radio-loop');
+      try { await execAsync('pkill -f "ffmpeg -re -i"'); } catch(e) {}
+      try { await execAsync('pkill -f "curl.*source"'); } catch(e) {}
       await execAsync('pm2 start srt-listener');
     } else if (action === 'stop') {
       await execAsync('pm2 stop srt-listener');

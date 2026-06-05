@@ -11,6 +11,7 @@ SOURCE_PASS=""
 SRT_PASSPHRASE=""
 RECORDINGS_DIR_FROM_ENV=""
 FACEBOOK_KEY_FROM_ENV=""
+FACEBOOK_ENABLE="${FACEBOOK_ENABLE:-0}"
 if [ -f "$ENV_FILE" ]; then
   while IFS='=' read -r key value; do
     case "$key" in
@@ -19,8 +20,9 @@ if [ -f "$ENV_FILE" ]; then
       SRT_PASSPHRASE) SRT_PASSPHRASE="$value" ;;
       RECORDINGS_DIR) RECORDINGS_DIR_FROM_ENV="$value" ;;
       FACEBOOK_KEY) FACEBOOK_KEY_FROM_ENV="$value" ;;
+      FACEBOOK_ENABLE) FACEBOOK_ENABLE="$value" ;;
     esac
-  done < <(grep -E '^(SOURCE_USER|SOURCE_PASS|SRT_PASSPHRASE|RECORDINGS_DIR|FACEBOOK_KEY)=' "$ENV_FILE" 2>/dev/null || true)
+  done < <(grep -E '^(SOURCE_USER|SOURCE_PASS|SRT_PASSPHRASE|RECORDINGS_DIR|FACEBOOK_KEY|FACEBOOK_ENABLE)=' "$ENV_FILE" 2>/dev/null || true)
 fi
 
 if [ -z "$SOURCE_USER" ] || [ -z "$SOURCE_PASS" ]; then
@@ -40,8 +42,8 @@ fi
 FACEBOOK_URL="rtmps://live-api-s.facebook.com:443/rtmp/"
 FACEBOOK_KEY="${FACEBOOK_KEY:-TU_CLAVE_DE_TRANSMISION}"
 
-if [ "$FACEBOOK_KEY" = "TU_CLAVE_DE_TRANSMISION" ]; then
-  echo "⚠️  FACEBOOK_KEY no configurada. Solo se transmitirá a la Radio Web."
+if [ "$FACEBOOK_KEY" = "TU_CLAVE_DE_TRANSMISION" ] || [ "$FACEBOOK_ENABLE" != "1" ]; then
+  echo "Facebook deshabilitado temporalmente para no tumbar el relay."
 else
   echo "Facebook Live habilitado."
 fi
@@ -64,22 +66,28 @@ echo "[$(date -u +%FT%TZ)] Iniciando pipeline SRT..."
 echo "Grabación local en VPS: $RECORDING_FILE"
 
 TEE_OUTPUTS="[f=matroska]$RECORDING_FILE"
-if [ "$FACEBOOK_KEY" != "TU_CLAVE_DE_TRANSMISION" ]; then
+if [ "$FACEBOOK_ENABLE" = "1" ] && [ "$FACEBOOK_KEY" != "TU_CLAVE_DE_TRANSMISION" ]; then
   TEE_OUTPUTS="[onfail=ignore:use_fifo=1:f=flv]${FACEBOOK_URL}${FACEBOOK_KEY}|$TEE_OUTPUTS"
 fi
 
 ffmpeg \
   -i "${SRT_LISTENER_URL}" \
   -filter_complex "[0:a]asplit=2[a_radio][a_av]" \
-  -map 0:v:0 -map "[a_av]" -c:v copy -c:a aac -b:a 160k -f tee "$TEE_OUTPUTS" \
+  -map 0:v:0 -map "[a_av]" \
+  -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p \
+  -profile:v high -g 60 -keyint_min 60 -sc_threshold 0 \
+  -flags +global_header \
+  -c:a aac -b:a 160k \
+  -f tee "$TEE_OUTPUTS" \
   -map "[a_radio]" -c:a libmp3lame -b:a 128k -f mp3 - \
   2>>/tmp/ffmpeg-restream.log | \
 curl \
-  -v \
+  --silent --show-error \
   -X PUT \
   -H 'Content-Type: application/octet-stream' \
   -H 'Transfer-Encoding: chunked' \
   -H 'Connection: keep-alive' \
+  -H 'Expect:' \
   --keepalive-time 30 \
   --speed-limit 0 \
   --speed-time 0 \

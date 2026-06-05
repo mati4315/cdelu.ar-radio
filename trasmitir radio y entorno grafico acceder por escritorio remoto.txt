@@ -12,3 +12,10 @@ srt://radio.cdelu.io:8890?mode=caller
 
 Stream Key / Passphrase	
 cdelu-radio-2026
+
+
+
+Abrí Escritorio remoto (mstsc)
+Poné como equipo: 212.147.253.221:3389
+Usuario: radioadmin
+Contraseña: Matias4315
