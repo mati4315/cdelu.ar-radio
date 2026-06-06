@@ -24,6 +24,25 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo Subiendo scripts de restream al VPS...
+scp -i "%SSH_KEY%" -o StrictHostKeyChecking=no "%PROJECT_DIR%\restream.sh" root@%VPS_IP%:/var/www/radio/restream.sh
+if errorlevel 1 (
+  echo ERROR: No se pudo copiar restream.sh al VPS.
+  exit /b 1
+)
+scp -i "%SSH_KEY%" -o StrictHostKeyChecking=no "%PROJECT_DIR%\deploy\restream.sh" root@%VPS_IP%:/var/www/radio/deploy/restream.sh
+if errorlevel 1 (
+  echo ERROR: No se pudo copiar deploy/restream.sh al VPS.
+  exit /b 1
+)
+
+echo Corrigiendo CRLF y verificando scripts en el VPS...
+ssh -i "%SSH_KEY%" -o StrictHostKeyChecking=no root@%VPS_IP% "sed -i 's/\r$//' /var/www/radio/restream.sh /var/www/radio/deploy/restream.sh && bash -n /var/www/radio/restream.sh && bash -n /var/www/radio/deploy/restream.sh"
+if errorlevel 1 (
+  echo ERROR: Error de sintaxis o formato en los scripts subidos al VPS.
+  exit /b 1
+)
+
 echo Verificando variables criticas en el VPS...
 ssh -i "%SSH_KEY%" -o StrictHostKeyChecking=no root@%VPS_IP% "cd /var/www/radio && grep -q '^FACEBOOK_KEY=' .env && grep -q '^SRT_PASSPHRASE=' .env && grep -q '^SOURCE_USER=' .env && grep -q '^SOURCE_PASS=' .env"
 if errorlevel 1 (

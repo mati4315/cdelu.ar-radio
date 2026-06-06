@@ -25,6 +25,7 @@ const SOURCE_USER = process.env.SOURCE_USER || '';
 const SOURCE_PASS = process.env.SOURCE_PASS || '';
 const STREAM_NAME = process.env.STREAM_NAME || 'Radio Live';
 const FACEBOOK_KEY = process.env.FACEBOOK_KEY || '';
+const FACEBOOK_KEY_2 = process.env.FACEBOOK_KEY_2 || process.env.FACEBOOK_KEY2 || '';
 const SRT_PASSPHRASE = process.env.SRT_PASSPHRASE || '';
 // Give the source a generous window before we consider it offline.
 // Short stalls on the network or encoder should not tear down the stream.
@@ -444,7 +445,7 @@ app.get('/api/srt/status', async (request, reply) => {
 app.get('/api/system/status', async (request, reply) => {
   try {
     return {
-      facebookConfigured: Boolean(FACEBOOK_KEY && FACEBOOK_KEY !== 'TU_CLAVE_DE_TRANSMISION'),
+      facebookConfigured: Boolean((FACEBOOK_KEY && FACEBOOK_KEY !== 'TU_CLAVE_DE_TRANSMISION') || (FACEBOOK_KEY_2 && FACEBOOK_KEY_2 !== 'TU_CLAVE_DE_TRANSMISION')),
       srtConfigured: Boolean(SRT_PASSPHRASE),
       recordingsConfigured: Boolean(RECORDINGS_DIR),
       recordingsDir: RECORDINGS_DIR

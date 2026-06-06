@@ -11,6 +11,7 @@ SOURCE_PASS=""
 SRT_PASSPHRASE=""
 RECORDINGS_DIR_FROM_ENV=""
 FACEBOOK_KEY_FROM_ENV=""
+FACEBOOK_KEY_2_FROM_ENV=""
 VIDEO_BITRATE="${VIDEO_BITRATE:-4000k}"
 FACEBOOK_ENABLE="${FACEBOOK_ENABLE:-0}"
 if [ -f "$ENV_FILE" ]; then
@@ -21,10 +22,11 @@ if [ -f "$ENV_FILE" ]; then
       SRT_PASSPHRASE) SRT_PASSPHRASE="$value" ;;
       RECORDINGS_DIR) RECORDINGS_DIR_FROM_ENV="$value" ;;
       FACEBOOK_KEY) FACEBOOK_KEY_FROM_ENV="$value" ;;
+      FACEBOOK_KEY_2|FACEBOOK_KEY2) FACEBOOK_KEY_2_FROM_ENV="$value" ;;
       FACEBOOK_ENABLE) FACEBOOK_ENABLE="$value" ;;
       VIDEO_BITRATE) VIDEO_BITRATE="$value" ;;
     esac
-  done < <(grep -E '^(SOURCE_USER|SOURCE_PASS|SRT_PASSPHRASE|RECORDINGS_DIR|FACEBOOK_KEY|FACEBOOK_ENABLE|VIDEO_BITRATE)=' "$ENV_FILE" 2>/dev/null || true)
+  done < <(grep -E '^(SOURCE_USER|SOURCE_PASS|SRT_PASSPHRASE|RECORDINGS_DIR|FACEBOOK_KEY|FACEBOOK_KEY_2|FACEBOOK_KEY2|FACEBOOK_ENABLE|VIDEO_BITRATE)=' "$ENV_FILE" 2>/dev/null || true)
 fi
 
 if [ -z "$SOURCE_USER" ] || [ -z "$SOURCE_PASS" ]; then
@@ -40,14 +42,28 @@ if [ -n "$FACEBOOK_KEY_FROM_ENV" ]; then
   FACEBOOK_KEY="$FACEBOOK_KEY_FROM_ENV"
 fi
 
+if [ -n "$FACEBOOK_KEY_2_FROM_ENV" ]; then
+  FACEBOOK_KEY_2="$FACEBOOK_KEY_2_FROM_ENV"
+fi
+
 # --- CONFIGURAR FACEBOOK ---
 FACEBOOK_URL="rtmps://live-api-s.facebook.com:443/rtmp/"
 FACEBOOK_KEY="${FACEBOOK_KEY:-TU_CLAVE_DE_TRANSMISION}"
+FACEBOOK_KEY_2="${FACEBOOK_KEY_2:-}"
 
-if [ "$FACEBOOK_KEY" = "TU_CLAVE_DE_TRANSMISION" ] || [ "$FACEBOOK_ENABLE" != "1" ]; then
-  echo "Facebook deshabilitado temporalmente para no tumbar el relay."
+if [ "$FACEBOOK_ENABLE" = "1" ]; then
+  if [ -n "$FACEBOOK_KEY" ] && [ "$FACEBOOK_KEY" != "TU_CLAVE_DE_TRANSMISION" ]; then
+    echo "Facebook Live 1 habilitado."
+  else
+    echo "Facebook Live 1 deshabilitado o sin clave."
+  fi
+  if [ -n "$FACEBOOK_KEY_2" ] && [ "$FACEBOOK_KEY_2" != "TU_CLAVE_DE_TRANSMISION" ]; then
+    echo "Facebook Live 2 habilitado."
+  else
+    echo "Facebook Live 2 deshabilitado o sin clave."
+  fi
 else
-  echo "Facebook Live habilitado."
+  echo "Facebook Live deshabilitado por completo (FACEBOOK_ENABLE=0)."
 fi
 
 SRT_PORT="${SRT_PORT:-8890}"
@@ -67,9 +83,25 @@ RECORDING_FILE="${RECORDINGS_DIR}/obs-$(date +%Y-%m-%d_%H-%M-%S).mkv"
 echo "[$(date -u +%FT%TZ)] Iniciando pipeline SRT..."
 echo "Grabación local en VPS: $RECORDING_FILE"
 
+# Construir tee de salidas opcionales
 TEE_OUTPUTS="[f=matroska]$RECORDING_FILE"
-if [ "$FACEBOOK_ENABLE" = "1" ] && [ "$FACEBOOK_KEY" != "TU_CLAVE_DE_TRANSMISION" ]; then
+if [ "$FACEBOOK_ENABLE" = "1" ] && [ -n "$FACEBOOK_KEY" ] && [ "$FACEBOOK_KEY" != "TU_CLAVE_DE_TRANSMISION" ]; then
   TEE_OUTPUTS="[onfail=ignore:use_fifo=1:f=flv]${FACEBOOK_URL}${FACEBOOK_KEY}|$TEE_OUTPUTS"
+fi
+if [ "$FACEBOOK_ENABLE" = "1" ] && [ -n "$FACEBOOK_KEY_2" ] && [ "$FACEBOOK_KEY_2" != "TU_CLAVE_DE_TRANSMISION" ]; then
+  TEE_OUTPUTS="[onfail=ignore:use_fifo=1:f=flv]${FACEBOOK_URL}${FACEBOOK_KEY_2}|$TEE_OUTPUTS"
+fi
+
+# Configurar argumentos de redaccion para sed (evitando patrones vacios)
+SED_ARGS=()
+if [ -n "$FACEBOOK_KEY" ] && [ "$FACEBOOK_KEY" != "TU_CLAVE_DE_TRANSMISION" ]; then
+  SED_ARGS+=("-e" "s#${FACEBOOK_KEY}#***REDACTED***#g")
+fi
+if [ -n "$FACEBOOK_KEY_2" ] && [ "$FACEBOOK_KEY_2" != "TU_CLAVE_DE_TRANSMISION" ]; then
+  SED_ARGS+=("-e" "s#${FACEBOOK_KEY_2}#***REDACTED***#g")
+fi
+if [ ${#SED_ARGS[@]} -eq 0 ]; then
+  SED_ARGS+=("-e" "s#dummy_pattern_to_not_match_anything#***REDACTED***#g")
 fi
 
 ffmpeg \
@@ -83,7 +115,7 @@ ffmpeg \
   -c:a aac -b:a 160k \
   -f tee "$TEE_OUTPUTS" \
   -map "[a_radio]" -c:a libmp3lame -b:a 128k -f mp3 - \
-  2> >(sed -e "s#${FACEBOOK_URL}${FACEBOOK_KEY}#${FACEBOOK_URL}***REDACTED***#g" -e "s#${FACEBOOK_KEY}#***REDACTED***#g" >>/tmp/ffmpeg-restream.log) | \
+  2> >(sed "${SED_ARGS[@]}" >>/tmp/ffmpeg-restream.log) | \
 curl \
   --silent --show-error \
   -X PUT \
