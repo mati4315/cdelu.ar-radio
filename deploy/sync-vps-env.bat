@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 
 set "PROJECT_DIR=D:\RADIO\Radio web Nodejs"
-set "VPS_IP=212.147.253.221"
+set "VPS_IP=212.147.252.19"
 set "SSH_KEY=%PROJECT_DIR%\upcloud_key"
 set "LOCAL_ENV=%PROJECT_DIR%\.env"
 
@@ -36,6 +36,20 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo Subiendo src/server.js al VPS...
+scp -i "%SSH_KEY%" -o StrictHostKeyChecking=no "%PROJECT_DIR%\src\server.js" root@%VPS_IP%:/var/www/radio/src/server.js
+if errorlevel 1 (
+  echo ERROR: No se pudo copiar src/server.js al VPS.
+  exit /b 1
+)
+
+echo Subiendo public/index.html al VPS...
+scp -i "%SSH_KEY%" -o StrictHostKeyChecking=no "%PROJECT_DIR%\public\index.html" root@%VPS_IP%:/var/www/radio/public/index.html
+if errorlevel 1 (
+  echo ERROR: No se pudo copiar public/index.html al VPS.
+  exit /b 1
+)
+
 echo Corrigiendo CRLF y verificando scripts en el VPS...
 ssh -i "%SSH_KEY%" -o StrictHostKeyChecking=no root@%VPS_IP% "sed -i 's/\r$//' /var/www/radio/restream.sh /var/www/radio/deploy/restream.sh && bash -n /var/www/radio/restream.sh && bash -n /var/www/radio/deploy/restream.sh"
 if errorlevel 1 (
@@ -57,8 +71,8 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Reiniciando srt-listener y apagando Auto-DJ...
-ssh -i "%SSH_KEY%" -o StrictHostKeyChecking=no root@%VPS_IP% "cd /var/www/radio && pm2 stop radio-loop && pm2 restart srt-listener --update-env && pm2 save"
+echo Reiniciando srt-listener, radio-envivo y apagando Auto-DJ...
+ssh -i "%SSH_KEY%" -o StrictHostKeyChecking=no root@%VPS_IP% "cd /var/www/radio && pm2 stop radio-loop && pm2 restart srt-listener --update-env && pm2 restart radio-envivo --update-env && pm2 save"
 if errorlevel 1 (
   echo ERROR: No se pudo reiniciar srt-listener.
   exit /b 1

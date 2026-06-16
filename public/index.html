@@ -642,7 +642,7 @@
         }
         return res;
       } catch (err) {
-        console.error('API Error:', err);
+        console.error('API Error:', url, err);
         return null;
       }
     }
@@ -660,14 +660,22 @@
       
       const res = await apiCall('/api/autodj', 'POST', { action });
       
-      if (!res || !res.ok) {
-        alert('Error al cambiar el estado del Auto-DJ. Intenta de nuevo.');
-        // Revert UI
+      if (!res) {
+        alert('Error de conexión al cambiar el estado del Auto-DJ. Verificá la consola.');
+        e.target.checked = !e.target.checked;
+      } else if (!res.ok) {
+        try {
+          const errData = await res.json();
+          alert('Error del servidor: ' + (errData.error || 'desconocido'));
+          console.error('Auto-DJ toggle error:', errData);
+        } catch (_) {
+          alert('Error al cambiar el estado del Auto-DJ. Intenta de nuevo.');
+        }
         e.target.checked = !e.target.checked;
       }
       
       autodjToggle.disabled = false;
-      refreshAutoDjStatus(); // Force status update
+      refreshAutoDjStatus();
     });
 
     async function refreshAutoDjStatus() {
@@ -693,13 +701,22 @@
       
       const res = await apiCall('/api/srt', 'POST', { action });
       
-      if (!res || !res.ok) {
-        alert('Error al cambiar el estado del SRT Restreamer. Intenta de nuevo.');
+      if (!res) {
+        alert('Error de conexión al cambiar el estado del SRT. Verificá la consola.');
+        e.target.checked = !e.target.checked;
+      } else if (!res.ok) {
+        try {
+          const errData = await res.json();
+          alert('Error del servidor: ' + (errData.error || 'desconocido'));
+          console.error('SRT toggle error:', errData);
+        } catch (_) {
+          alert('Error al cambiar el estado del SRT Restreamer. Intenta de nuevo.');
+        }
         e.target.checked = !e.target.checked;
       }
       
       srtToggle.disabled = false;
-      refreshSrtStatus(); // Force status update
+      refreshSrtStatus();
     });
 
     async function refreshSrtStatus() {
@@ -762,8 +779,17 @@
       if (!confirm(`¿Eliminar definitivamente "${name}"?`)) return;
 
       const res = await apiCall(`/api/recordings/${encodeURIComponent(name)}`, 'DELETE');
-      if (!res || !res.ok) {
-        alert('No se pudo eliminar el video.');
+      if (!res) {
+        alert('Error de conexión al eliminar el video.');
+        return;
+      }
+      if (!res.ok) {
+        try {
+          const errData = await res.json();
+          alert('Error del servidor: ' + (errData.error || 'desconocido'));
+        } catch (_) {
+          alert('No se pudo eliminar el video.');
+        }
         return;
       }
 
@@ -780,8 +806,17 @@
       clearSelectedRecording();
 
       const res = await apiCall('/api/recordings', 'GET');
-      if (!res || !res.ok) {
-        recordingsStatus.textContent = 'No pude cargar la lista. Iniciá sesión de admin y probá otra vez.';
+      if (!res) {
+        recordingsStatus.textContent = 'Error de conexión al cargar la lista.';
+        return;
+      }
+      if (!res.ok) {
+        try {
+          const errData = await res.json();
+          recordingsStatus.textContent = 'Error: ' + (errData.error || res.status);
+        } catch (_) {
+          recordingsStatus.textContent = 'No pude cargar la lista. Iniciá sesión de admin y probá otra vez.';
+        }
         return;
       }
 

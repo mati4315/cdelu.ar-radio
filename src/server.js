@@ -19,6 +19,17 @@ if (existsSync(envPath)) {
 
 const execAsync = util.promisify(exec);
 
+async function runCmd(cmd, logger) {
+  try {
+    if (logger) logger.info(`Executing command: ${cmd}`);
+    const { stdout, stderr } = await execAsync(cmd);
+    return { success: true, stdout, stderr };
+  } catch (error) {
+    if (logger) logger.warn({ cmd, error }, `Command execution returned non-zero or failed: ${cmd}`);
+    return { success: false, error, stdout: error.stdout, stderr: error.stderr };
+  }
+}
+
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 const SOURCE_USER = process.env.SOURCE_USER || '';
@@ -411,14 +422,16 @@ app.post('/api/autodj', async (request, reply) => {
 
   try {
     if (action === 'start') {
-      await execAsync('pm2 stop srt-listener');
-      try { await execAsync('pkill -f "ffmpeg.*srt"'); } catch(e) {}
-      await execAsync('pm2 start radio-loop');
+      await runCmd('pm2 stop srt-listener', request.log);
+      await runCmd('pkill -f "ffmpeg.*srt"', request.log);
+      const res = await runCmd('pm2 start radio-loop', request.log);
+      if (!res.success) {
+        return reply.code(500).send({ error: 'Failed to start Auto-DJ loop' });
+      }
     } else if (action === 'stop') {
-      await execAsync('pm2 stop radio-loop');
-      // Asegurarse de que los procesos hijos mueran
-      try { await execAsync('pkill -f "ffmpeg -re -i"'); } catch(e) {}
-      try { await execAsync('pkill -f "curl.*source"'); } catch(e) {}
+      await runCmd('pm2 stop radio-loop', request.log);
+      await runCmd('pkill -f "ffmpeg -re -i"', request.log);
+      await runCmd('pkill -f "curl.*source"', request.log);
     } else {
       return reply.code(400).send({ error: 'Invalid action' });
     }
@@ -597,13 +610,16 @@ app.post('/api/srt', async (request, reply) => {
 
   try {
     if (action === 'start') {
-      await execAsync('pm2 stop radio-loop');
-      try { await execAsync('pkill -f "ffmpeg -re -i"'); } catch(e) {}
-      try { await execAsync('pkill -f "curl.*source"'); } catch(e) {}
-      await execAsync('pm2 start srt-listener');
+      await runCmd('pm2 stop radio-loop', request.log);
+      await runCmd('pkill -f "ffmpeg -re -i"', request.log);
+      await runCmd('pkill -f "curl.*source"', request.log);
+      const res = await runCmd('pm2 start srt-listener', request.log);
+      if (!res.success) {
+        return reply.code(500).send({ error: 'Failed to start SRT listener' });
+      }
     } else if (action === 'stop') {
-      await execAsync('pm2 stop srt-listener');
-      try { await execAsync('pkill -f "ffmpeg.*srt"'); } catch(e) {}
+      await runCmd('pm2 stop srt-listener', request.log);
+      await runCmd('pkill -f "ffmpeg.*srt"', request.log);
     } else {
       return reply.code(400).send({ error: 'Invalid action' });
     }

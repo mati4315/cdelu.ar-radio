@@ -5,7 +5,7 @@ No modifiques el comportamiento de `restream.sh` ni elimines protecciones sin co
 
 ---
 
-## Arquitectura (VPS: 212.147.253.221)
+## Arquitectura (VPS: 212.147.255.37)
 
 ```
 OBS → SRT(8890/udp) → restream.sh (ffmpeg listener)
@@ -165,21 +165,21 @@ Ambos scripts ahora comparten:
 
 ```bash
 # Estado general
-ssh -i upcloud_key root@212.147.253.221 'pm2 status'
+ssh -i upcloud_key root@212.147.255.37 'pm2 status'
 
 # ¿Hay más de una fuente?
-ssh -i upcloud_key root@212.147.253.221 \
+ssh -i upcloud_key root@212.147.255.37 \
   "grep -nE 'source connected|existing source' /var/log/radio/output.log | tail -n 30"
 
 # ¿FFmpeg tiene errores?
-ssh -i upcloud_key root@212.147.253.221 'tail -n 80 /tmp/ffmpeg-restream.log'
+ssh -i upcloud_key root@212.147.255.37 'tail -n 80 /tmp/ffmpeg-restream.log'
 
 # ¿Puertos activos?
-ssh -i upcloud_key root@212.147.253.221 "ss -lunpt | grep -E ':8890|:3000'"
+ssh -i upcloud_key root@212.147.255.37 "ss -lunpt | grep -E ':8890|:3000'"
 
 # Reinicio seguro por HTTP (si SSH no funciona)
 curl -sS -u "user:pass" -H "Content-Type: application/json" \
-  -d '{"action":"start"}' http://212.147.253.221:3000/api/srt
+  -d '{"action":"start"}' http://212.147.255.37:3000/api/srt
 ```
 
 ---
