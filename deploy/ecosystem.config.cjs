@@ -3,6 +3,7 @@ module.exports = {
     {
       name: 'radio-envivo',
       script: 'src/server.js',
+      cwd: '/var/www/radio',
       instances: 1,
       exec_mode: 'fork',
       autorestart: true,
@@ -24,6 +25,7 @@ module.exports = {
     {
       name: 'radio-loop',
       script: 'loop.sh',
+      cwd: '/var/www/radio',
       autorestart: true,
       max_restarts: 5,
       restart_delay: 10000
@@ -31,6 +33,7 @@ module.exports = {
     {
       name: 'srt-listener',
       script: 'restream.sh',
+      cwd: '/var/www/radio',
       autorestart: true,
       max_restarts: 10,
       restart_delay: 5000,
