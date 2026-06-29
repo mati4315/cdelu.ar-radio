@@ -12,7 +12,7 @@ FACEBOOK_ENABLE="${FACEBOOK_ENABLE:-0}"
 
 # Cargar .env
 if [ -f "$ENV_FILE" ]; then
-  export $(grep -E '^(SOURCE_USER|SOURCE_PASS|SRT_PASSPHRASE|RECORDINGS_DIR|FACEBOOK_KEY|FACEBOOK_KEY_2|FACEBOOK_KEY2|FACEBOOK_ENABLE|SRT_PORT|SRT_LATENCY)=' "$ENV_FILE" 2>/dev/null | xargs)
+  export $(grep -E '^(SOURCE_USER|SOURCE_PASS|SRT_PASSPHRASE|RECORDINGS_DIR|FACEBOOK_KEY|FACEBOOK_KEY_2|FACEBOOK_KEY2|FACEBOOK_KEY_3|FACEBOOK_KEY3|FACEBOOK_ENABLE|SRT_PORT|SRT_LATENCY)=' "$ENV_FILE" 2>/dev/null | xargs)
 fi
 
 SOURCE_USER="${SOURCE_USER:-}"
@@ -20,6 +20,7 @@ SOURCE_PASS="${SOURCE_PASS:-}"
 SRT_PASSPHRASE="${SRT_PASSPHRASE:-}"
 FACEBOOK_KEY="${FACEBOOK_KEY:-TU_CLAVE_DE_TRANSMISION}"
 FACEBOOK_KEY_2="${FACEBOOK_KEY_2:-${FACEBOOK_KEY2:-}}"
+FACEBOOK_KEY_3="${FACEBOOK_KEY_3:-${FACEBOOK_KEY3:-}}"
 
 if [ -z "$SOURCE_USER" ] || [ -z "$SOURCE_PASS" ]; then
   echo "ERROR: SOURCE_USER/SOURCE_PASS no configurados en $ENV_FILE"
@@ -59,6 +60,13 @@ else
   echo "[$(date -u +%FT%TZ)] Facebook 2: deshabilitado"
 fi
 
+if [ "$FACEBOOK_ENABLE" = "1" ] && [ "$FACEBOOK_KEY_3" != "TU_CLAVE_DE_TRANSMISION" ] && [ -n "$FACEBOOK_KEY_3" ]; then
+  TEE_OUTPUTS="$TEE_OUTPUTS|[onfail=ignore:use_fifo=1:f=flv]${FACEBOOK_URL}${FACEBOOK_KEY_3}"
+  echo "[$(date -u +%FT%TZ)] Facebook 3: CONFIGURADO (fallo no detiene la radio)"
+else
+  echo "[$(date -u +%FT%TZ)] Facebook 3: deshabilitado"
+fi
+
 # Configurar argumentos de redaccion para sed (evitando patrones vacios)
 SED_ARGS=()
 if [ -n "$FACEBOOK_KEY" ] && [ "$FACEBOOK_KEY" != "TU_CLAVE_DE_TRANSMISION" ]; then
@@ -66,6 +74,9 @@ if [ -n "$FACEBOOK_KEY" ] && [ "$FACEBOOK_KEY" != "TU_CLAVE_DE_TRANSMISION" ]; t
 fi
 if [ -n "$FACEBOOK_KEY_2" ] && [ "$FACEBOOK_KEY_2" != "TU_CLAVE_DE_TRANSMISION" ]; then
   SED_ARGS+=("-e" "s#${FACEBOOK_KEY_2}#***REDACTED***#g")
+fi
+if [ -n "$FACEBOOK_KEY_3" ] && [ "$FACEBOOK_KEY_3" != "TU_CLAVE_DE_TRANSMISION" ]; then
+  SED_ARGS+=("-e" "s#${FACEBOOK_KEY_3}#***REDACTED***#g")
 fi
 if [ ${#SED_ARGS[@]} -eq 0 ]; then
   SED_ARGS+=("-e" "s#dummy_pattern_to_not_match_anything#***REDACTED***#g")
